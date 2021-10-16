@@ -15,6 +15,8 @@ import (
 var ErrBreakNotFound = errors.New("break not found")
 
 func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
+	// TODO use chromedp to dynamically expand first day's forecast
+
 	req, err := newRequest(http.MethodGet, fmt.Sprintf(endpointFormatDailyForecast, breakName))
 	if err != nil {
 		return DailyForecast{}, fmt.Errorf("could not prepare request: %w", err)
@@ -47,7 +49,7 @@ func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
 }
 
 type DailyForecast struct {
-	Day             Day
+	Day             Day // TODO convert to time.Time
 	HourlyForecasts []HourlyForecast
 }
 
@@ -55,7 +57,8 @@ func newDailyForecast(
 	day Day,
 	hours []int,
 	ratings []int,
-	swells [][]Swell) (DailyForecast, error) {
+	swells [][]Swell,
+	waveEnergies []float64) (DailyForecast, error) {
 
 	if len(hours) != len(ratings) {
 		return DailyForecast{}, errors.New("hours and ratings must have equal number of elements")
@@ -65,11 +68,16 @@ func newDailyForecast(
 		return DailyForecast{}, errors.New("hours and swells must have equal number of elements")
 	}
 
+	if len(hours) != len(waveEnergies) {
+		return DailyForecast{}, errors.New("hours and wave energies must have equal number of elements")
+	}
+
 	hourlyForecasts := make([]HourlyForecast, len(hours))
 	for i := range hourlyForecasts {
 		hourlyForecasts[i].Hour = hours[i]
 		hourlyForecasts[i].Rating = ratings[i]
 		hourlyForecasts[i].Swells = swells[i]
+		hourlyForecasts[i].WaveEnergyInKiloJoules = waveEnergies[i]
 	}
 
 	return DailyForecast{
@@ -84,16 +92,16 @@ type Day struct {
 }
 
 type HourlyForecast struct {
-	Hour   int
-	Rating int
-	Swells []Swell
+	Hour                   int // TODO convert to time.Time
+	Rating                 int
+	Swells                 []Swell
+	WaveEnergyInKiloJoules float64
 	// TODO wind
 	// TODO tide
-	// TODO energy
 }
 
 type Swell struct {
-	PeriodInSeconds          int
+	PeriodInSeconds          float64
 	DirectionInDegrees       float64
 	DirectionInCompassPoints string
 	WaveHeightInMeters       float64
@@ -125,7 +133,18 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 		return DailyForecast{}, fmt.Errorf("could not scrape first day swells: %w", err)
 	}
 
-	return newDailyForecast(firstDay, firstDayHours, firstDayRatings, firstDaySwells)
+	firstDayWaveEnergies, err := scrapeFirstDayWaveEnergies(tableNode)
+	if err != nil {
+		return DailyForecast{}, fmt.Errorf("could not scrape first day wave energies: %w", err)
+	}
+
+	return newDailyForecast(
+		firstDay,
+		firstDayHours,
+		firstDayRatings,
+		firstDaySwells,
+		firstDayWaveEnergies,
+	)
 }
 
 func scrapeFirstDay(n *html.Node) (Day, error) {
@@ -154,17 +173,17 @@ func scrapeFirstDay(n *html.Node) (Day, error) {
 func scrapeDay(n *html.Node) (Day, error) {
 	container := n.LastChild
 	if container == nil {
-		return Day{}, errors.New("container node not found")
+		return Day{}, errors.New("could not find day container node")
 	}
 
 	weekdayContainer := container.FirstChild
 	if weekdayContainer == nil {
-		return Day{}, errors.New("weekday container node not found")
+		return Day{}, errors.New("could not find weekday container node")
 	}
 
 	weekdayText := weekdayContainer.FirstChild
 	if weekdayText == nil {
-		return Day{}, errors.New("weekday text node not found")
+		return Day{}, errors.New("could not find weekday text node")
 	}
 
 	weekday, err := parseWeekday(weekdayText.Data)
@@ -174,12 +193,12 @@ func scrapeDay(n *html.Node) (Day, error) {
 
 	monthDayContainer := container.LastChild
 	if monthDayContainer == nil {
-		return Day{}, errors.New("month day container node not found")
+		return Day{}, errors.New("could not find month day container node")
 	}
 
 	monthDayText := monthDayContainer.FirstChild
 	if monthDayText == nil {
-		return Day{}, errors.New("month day text node not found")
+		return Day{}, errors.New("could not find month day text node")
 	}
 
 	monthDay, err := parseMonthDay(monthDayText.Data)
@@ -234,7 +253,7 @@ func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 		htmlutil.WithAttributeEquals("data-row-name", "time"),
 	)
 	if !ok {
-		return nil, errors.New("could not find time node")
+		return nil, errors.New("could not find hours node")
 	}
 
 	var hours []int
@@ -263,12 +282,12 @@ func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 func scrapeHour(n *html.Node) (int, error) {
 	hourContainer := n.FirstChild
 	if hourContainer == nil {
-		return 0, errors.New("hour container node not found")
+		return 0, errors.New("could not find hour container node")
 	}
 
 	hourText := hourContainer.FirstChild
 	if hourText == nil {
-		return 0, errors.New("hour text node not found")
+		return 0, errors.New("could not find hour text node")
 	}
 
 	hour, err := parseTwelveClockHour(hourText.Data)
@@ -278,12 +297,12 @@ func scrapeHour(n *html.Node) (int, error) {
 
 	periodContainer := n.LastChild
 	if periodContainer == nil {
-		return 0, errors.New("clock period node not found")
+		return 0, errors.New("could not find clock period node")
 	}
 
 	periodText := periodContainer.FirstChild
 	if periodText == nil {
-		return 0, errors.New("clock period text not found")
+		return 0, errors.New("could not find clock period text node")
 	}
 
 	period, err := parseClockPeriod(periodText.Data)
@@ -345,7 +364,7 @@ func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
 		htmlutil.WithAttributeEquals("data-row-name", "rating"),
 	)
 	if !ok {
-		return nil, errors.New("could not find rating node")
+		return nil, errors.New("could not find ratings node")
 	}
 
 	var ratings []int
@@ -389,6 +408,71 @@ func parseRating(s string) (int, error) {
 	return rating, nil
 }
 
+func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
+	energiesNode, ok := htmlutil.Find(
+		n,
+		htmlutil.WithClassEquals("forecast-table__row"),
+		htmlutil.WithAttributeEquals("data-row-name", "energy"),
+	)
+	if !ok {
+		return nil, errors.New("could not find wave energies node")
+	}
+
+	var energies []float64
+	if err := htmlutil.ForEach(energiesNode, func(n *html.Node) error {
+		if htmlutil.ClassContains(n, "forecast-table__cell") {
+			energy, err := scrapeWaveEnergy(n)
+			if err != nil {
+				return fmt.Errorf("could not scrape wave energy: %w", err)
+			}
+
+			energies = append(energies, energy)
+
+			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			if isDayEnd {
+				return htmlutil.ErrLoopStopped
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("could not scrape wave energies: %w", err)
+	}
+
+	return energies, nil
+}
+
+func scrapeWaveEnergy(n *html.Node) (float64, error) {
+	container := n.FirstChild
+	if container == nil {
+		return 0, errors.New("could not find wave energy container node")
+	}
+
+	energyText := container.FirstChild
+	if energyText == nil {
+		return 0, errors.New("could not find wave energy text node")
+	}
+
+	energy, err := parseWaveEnergy(energyText.Data)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse wave energy: %w", err)
+	}
+
+	return energy, nil
+}
+
+func parseWaveEnergy(s string) (float64, error) {
+	energy, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("not float: %q", s)
+	}
+
+	if energy < 0 {
+		return 0, fmt.Errorf("invalid wave energy: %q", s)
+	}
+
+	return energy, nil
+}
+
 func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 	swellsNode, ok := htmlutil.Find(
 		n,
@@ -396,7 +480,7 @@ func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 		htmlutil.WithAttributeEquals("data-row-name", "wave-height"),
 	)
 	if !ok {
-		return nil, errors.New("could not find wave height node")
+		return nil, errors.New("could not find swells node")
 	}
 
 	var swells [][]Swell
@@ -451,7 +535,7 @@ func unmarshalSwells(b []byte) ([]Swell, error) {
 }
 
 type swellPayload struct {
-	Period  int     `json:"period"`
+	Period  float64 `json:"period"`
 	Angle   float64 `json:"angle"`
 	Letters string  `json:"letters"`
 	Height  float64 `json:"height"`

@@ -16,8 +16,18 @@ func main() {
 
 	for _, hf := range f.HourlyForecasts {
 		fmt.Println()
+		fmt.Println("----------------------------------------")
+
 		fmt.Printf("Hour: %d\n", hf.Hour)
-		fmt.Printf("Rating: %d/10\n", hf.Rating)
-		fmt.Printf("Swells: %+v\n", hf.Swells)
+		fmt.Printf("Rating (0-10): %d\n", hf.Rating)
+		fmt.Printf("Wave energy (kJ): %v\n", hf.WaveEnergyInKiloJoules)
+
+		for i, swell := range hf.Swells {
+			fmt.Printf("Swell #%d:\n", i+1)
+			fmt.Printf("\tPeriod (s): %v\n", swell.PeriodInSeconds)
+			fmt.Printf("\tDirection (degrees): %v\n", swell.DirectionInDegrees)
+			fmt.Printf("\tDirection (compass points): %s\n", swell.DirectionInCompassPoints)
+			fmt.Printf("\tWave height (m): %v\n", swell.WaveHeightInMeters)
+		}
 	}
 }
