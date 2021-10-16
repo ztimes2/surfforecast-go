@@ -164,10 +164,10 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 				}
 
 				forecast.HourlyForecasts[i].Swells = append(forecast.HourlyForecasts[i].Swells, Swell{
-					PeriodInSeconds:    s.Period,
-					DirectionAngleInDegrees:              s.Angle,
-					DirectionCompassPoints:   s.Letters,
-					WaveHeightInMeters: s.Height,
+					PeriodInSeconds:         s.Period,
+					DirectionInDegrees: s.Angle,
+					DirectionInCompassPoints:  s.Letters,
+					WaveHeightInMeters:      s.Height,
 				})
 			}
 
@@ -206,10 +206,10 @@ type HourlyForecast struct {
 }
 
 type Swell struct {
-	PeriodInSeconds         int
-	DirectionAngleInDegrees float64
-	DirectionCompassPoints  string
-	WaveHeightInMeters      float64
+	PeriodInSeconds          int
+	DirectionInDegrees       float64
+	DirectionInCompassPoints string
+	WaveHeightInMeters       float64
 }
 
 func scrapeDay(n *html.Node) (Day, error) {
