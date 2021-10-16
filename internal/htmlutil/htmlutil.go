@@ -11,7 +11,7 @@ const (
 	AttributeKeyClass = "class"
 )
 
-func Find(n *html.Node, conditions ...Condition) (*html.Node, bool) {
+func Find(n *html.Node, conditions ...FindCondition) (*html.Node, bool) {
 	if doesMeetConditions(n, conditions...) {
 		return n, true
 	}
@@ -22,13 +22,13 @@ func Find(n *html.Node, conditions ...Condition) (*html.Node, bool) {
 			return target, true
 		}
 	}
-	
+
 	return nil, false
 }
 
-type Condition func(*html.Node) bool
+type FindCondition func(*html.Node) bool
 
-func doesMeetConditions(n *html.Node, conditions ...Condition) bool {
+func doesMeetConditions(n *html.Node, conditions ...FindCondition) bool {
 	for _, c := range conditions {
 		if !c(n) {
 			return false
@@ -37,13 +37,13 @@ func doesMeetConditions(n *html.Node, conditions ...Condition) bool {
 	return true
 }
 
-func WithClassEquals(value string) Condition {
+func WithClassEquals(value string) FindCondition {
 	return func(n *html.Node) bool {
 		return ClassEquals(n, value)
 	}
 }
 
-func WithAttributeEquals(key, value string) Condition {
+func WithAttributeEquals(key, value string) FindCondition {
 	return func(n *html.Node) bool {
 		return AttributeEquals(n, key, value)
 	}
@@ -82,18 +82,18 @@ func Attribute(n *html.Node, key string) (html.Attribute, bool) {
 	return html.Attribute{}, false
 }
 
-func ForEach(n *html.Node, statement Statement) error {
-	if err := forEach(n, statement); err != nil && err != ErrLoopStopped {
+func ForEach(n *html.Node, statement ForEachStatement) error {
+	if err := forEach(n, statement); err != nil && err != ErrForEachStopped {
 		return err
 	}
 	return nil
 }
 
-type Statement func(*html.Node) error
+type ForEachStatement func(*html.Node) error
 
-var ErrLoopStopped = errors.New("loop was stopped")
+var ErrForEachStopped = errors.New("for-each loop was stopped")
 
-func forEach(n *html.Node, statement Statement) error {
+func forEach(n *html.Node, statement ForEachStatement) error {
 	if err := statement(n); err != nil {
 		return err
 	}
