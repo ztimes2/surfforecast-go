@@ -120,6 +120,22 @@ type Wind struct {
 }
 
 func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
+	issueDateNode, ok := htmlutil.Find(n, htmlutil.WithClassEquals("break-header__issued"))
+	if !ok {
+		return DailyForecast{}, errors.New("could not find issue date node")
+	}
+
+	issueDateText := issueDateNode.FirstChild.Data
+
+	parts := strings.Split(issueDateText, " ")
+	if len(parts) != 12 {
+		return DailyForecast{}, errors.New("issue date text must contain 12 elements")
+	}
+
+	weekDay, monthDay, month, year, timezone := parts[7], parts[8], parts[9], parts[10], parts[11]
+
+	fmt.Println(weekDay, monthDay, month, year, timezone)
+
 	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEquals("forecast-table__basic"))
 	if !ok {
 		return DailyForecast{}, errors.New("could not find table node")
