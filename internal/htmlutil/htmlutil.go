@@ -37,13 +37,19 @@ func doesMeetConditions(n *html.Node, conditions ...FindCondition) bool {
 	return true
 }
 
-func WithClassEquals(value string) FindCondition {
+func WithClassEqual(value string) FindCondition {
 	return func(n *html.Node) bool {
 		return ClassEquals(n, value)
 	}
 }
 
-func WithAttributeEquals(key, value string) FindCondition {
+func WithClassContaining(values ...string) FindCondition {
+	return func(n *html.Node) bool {
+		return ClassContains(n, values...)
+	}
+}
+
+func WithAttributeEqual(key, value string) FindCondition {
 	return func(n *html.Node) bool {
 		return AttributeEquals(n, key, value)
 	}
@@ -53,8 +59,13 @@ func ClassEquals(n *html.Node, value string) bool {
 	return AttributeEquals(n, AttributeKeyClass, value)
 }
 
-func ClassContains(n *html.Node, value string) bool {
-	return AttributeContains(n, AttributeKeyClass, value)
+func ClassContains(n *html.Node, values ...string) bool {
+	for _, v := range values {
+		if !AttributeContains(n, AttributeKeyClass, v) {
+			return false
+		}
+	}
+	return true
 }
 
 func AttributeEquals(n *html.Node, key, value string) bool {

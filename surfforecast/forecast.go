@@ -13,6 +13,30 @@ import (
 	"golang.org/x/net/html"
 )
 
+const (
+	classBreakHeaderIssued   = "break-header__issued"
+	classForecastTableBasic  = "forecast-table__basic"
+	classForecastTableRow    = "forecast-table__row"
+	classForecastTableCell   = "forecast-table__cell"
+	classForecastTableTime   = "forecast-table-time"
+	classForecastTableDays   = "forecast-table-days"
+	classForecastTableRating = "forecast-table-rating"
+	classIsDayEnd            = "is-day-end"
+
+	attributeDataRowName        = "data-row-name"
+	attributeDataSwellState     = "data-swell-state"
+	attributeDataSpeed =  "data-speed"
+	attributeAlternateImageText = "alt"
+
+	dataRowNameDays       = "days"
+	dataRowNameTime       = "time"
+	dataRowNameRating     = "rating"
+	dataRowNameWaveHeight = "wave-height"
+	dataRowNameEnergy =  "energy"
+	dataRowNameWind = "wind"
+	dataRowNameWindState = "wind-state"
+)
+
 var ErrBreakNotFound = errors.New("break not found")
 
 func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
@@ -120,7 +144,7 @@ type Wind struct {
 }
 
 func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
-	issueDateNode, ok := htmlutil.Find(n, htmlutil.WithClassEquals("break-header__issued"))
+	issueDateNode, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classBreakHeaderIssued))
 	if !ok {
 		return DailyForecast{}, errors.New("could not find issue date node")
 	}
@@ -134,9 +158,10 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 	weekDay, monthDay, month, year, timezone := parts[7], parts[8], parts[9], parts[10], parts[11]
 
+	// FIXME turn to day as time.Time
 	fmt.Println(weekDay, monthDay, month, year, timezone)
 
-	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEquals("forecast-table__basic"))
+	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classForecastTableBasic))
 	if !ok {
 		return DailyForecast{}, errors.New("could not find table node")
 	}
@@ -184,8 +209,8 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 func scrapeFirstDay(n *html.Node) (Day, error) {
 	daysNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row forecast-table-days"),
-		htmlutil.WithAttributeEquals("data-row-name", "days"),
+		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableDays),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameDays),
 	)
 	if !ok {
 		return Day{}, errors.New("could not find days node")
@@ -283,8 +308,8 @@ func parseMonthDay(s string) (int, error) {
 func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 	hoursNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row forecast-table-time"),
-		htmlutil.WithAttributeEquals("data-row-name", "time"),
+		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableTime),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameTime),
 	)
 	if !ok {
 		return nil, errors.New("could not find hours node")
@@ -292,7 +317,7 @@ func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 
 	var hours []int
 	if err := htmlutil.ForEach(hoursNode, func(n *html.Node) error {
-		if htmlutil.ClassContains(n, "forecast-table__cell") {
+		if htmlutil.ClassContains(n, classForecastTableCell) {
 			hour, err := scrapeHour(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape hour: %w", err)
@@ -300,7 +325,7 @@ func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 
 			hours = append(hours, hour)
 
-			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				return htmlutil.ErrForEachStopped
 			}
@@ -394,8 +419,8 @@ func toTwentyFourClockHour(hour int, p clockPeriod) int {
 func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
 	ratingsNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row forecast-table-rating"),
-		htmlutil.WithAttributeEquals("data-row-name", "rating"),
+		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableRating),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameRating),
 	)
 	if !ok {
 		return nil, errors.New("could not find ratings node")
@@ -403,8 +428,8 @@ func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
 
 	var ratings []int
 	if err := htmlutil.ForEach(ratingsNode, func(n *html.Node) error {
-		if htmlutil.ClassContains(n, "forecast-table__cell") {
-			ratingAttr, ok := htmlutil.Attribute(n.FirstChild, "alt")
+		if htmlutil.ClassContains(n, classForecastTableCell) {
+			ratingAttr, ok := htmlutil.Attribute(n.FirstChild, attributeAlternateImageText)
 			if !ok {
 				return errors.New("could not find rating attribute")
 			}
@@ -416,7 +441,7 @@ func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
 
 			ratings = append(ratings, rating)
 
-			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				return htmlutil.ErrForEachStopped
 			}
@@ -445,8 +470,8 @@ func parseRating(s string) (int, error) {
 func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 	swellsNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row"),
-		htmlutil.WithAttributeEquals("data-row-name", "wave-height"),
+		htmlutil.WithClassEqual(classForecastTableRow),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameWaveHeight),
 	)
 	if !ok {
 		return nil, errors.New("could not find swells node")
@@ -454,7 +479,7 @@ func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 
 	var swells [][]Swell
 	if err := htmlutil.ForEach(swellsNode, func(n *html.Node) error {
-		if htmlutil.ClassContains(n, "forecast-table__cell") {
+		if htmlutil.ClassContains(n, classForecastTableCell) {
 			hourlySwells, err := scrapeHourlySwells(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape hourly swells: %w", err)
@@ -462,7 +487,7 @@ func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 
 			swells = append(swells, hourlySwells)
 
-			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				return htmlutil.ErrForEachStopped
 			}
@@ -476,7 +501,7 @@ func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 }
 
 func scrapeHourlySwells(n *html.Node) ([]Swell, error) {
-	attr, ok := htmlutil.Attribute(n, "data-swell-state")
+	attr, ok := htmlutil.Attribute(n, attributeDataSwellState)
 	if !ok {
 		return nil, errors.New("could not find swells attribute")
 	}
@@ -522,8 +547,8 @@ type swell struct {
 func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
 	energiesNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row"),
-		htmlutil.WithAttributeEquals("data-row-name", "energy"),
+		htmlutil.WithClassEqual(classForecastTableRow),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameEnergy),
 	)
 	if !ok {
 		return nil, errors.New("could not find wave energies node")
@@ -531,7 +556,7 @@ func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
 
 	var energies []float64
 	if err := htmlutil.ForEach(energiesNode, func(n *html.Node) error {
-		if htmlutil.ClassContains(n, "forecast-table__cell") {
+		if htmlutil.ClassContains(n, classForecastTableCell) {
 			energy, err := scrapeWaveEnergy(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape wave energy: %w", err)
@@ -539,7 +564,7 @@ func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
 
 			energies = append(energies, energy)
 
-			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				return htmlutil.ErrForEachStopped
 			}
@@ -587,8 +612,8 @@ func parseWaveEnergy(s string) (float64, error) {
 func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
 	windsNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row"),
-		htmlutil.WithAttributeEquals("data-row-name", "wind"),
+		htmlutil.WithClassEqual(classForecastTableRow),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameWind),
 	)
 	if !ok {
 		return nil, errors.New("could not find winds node")
@@ -596,7 +621,7 @@ func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
 
 	var winds []Wind
 	if err := htmlutil.ForEach(windsNode, func(n *html.Node) error {
-		if htmlutil.ClassContains(n, "forecast-table__cell") {
+		if htmlutil.ClassContains(n, classForecastTableCell) {
 			wind, err := scrapeWind(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape wind: %w", err)
@@ -604,7 +629,7 @@ func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
 
 			winds = append(winds, wind)
 
-			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				return htmlutil.ErrForEachStopped
 			}
@@ -636,7 +661,7 @@ func scrapeWind(n *html.Node) (Wind, error) {
 		return Wind{}, errors.New("could not find wind container node")
 	}
 
-	speedAttr, ok := htmlutil.Attribute(container, "data-speed")
+	speedAttr, ok := htmlutil.Attribute(container, attributeDataSpeed)
 	if !ok {
 		return Wind{}, errors.New("could not find wind speed attribute")
 	}
@@ -678,8 +703,8 @@ func parseWindSpeed(s string) (float64, error) {
 func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
 	statesNode, ok := htmlutil.Find(
 		n,
-		htmlutil.WithClassEquals("forecast-table__row"),
-		htmlutil.WithAttributeEquals("data-row-name", "wind-state"),
+		htmlutil.WithClassEqual(classForecastTableRow),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameWindState),
 	)
 	if !ok {
 		return nil, errors.New("could not find wind states node")
@@ -687,7 +712,7 @@ func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
 
 	var states []string
 	if err := htmlutil.ForEach(statesNode, func(n *html.Node) error {
-		if htmlutil.ClassContains(n, "forecast-table__cell") {
+		if htmlutil.ClassContains(n, classForecastTableCell) {
 			state, err := scrapeWindState(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape wind state: %w", err)
@@ -695,7 +720,7 @@ func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
 
 			states = append(states, state)
 
-			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				return htmlutil.ErrForEachStopped
 			}
