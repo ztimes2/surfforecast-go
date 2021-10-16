@@ -42,15 +42,15 @@ func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
 }
 
 func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
-	tableNode, ok := htmlutil.Find(n, htmlutil.WithAttributeValue("class", "forecast-table__basic"))
+	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEquals("forecast-table__basic"))
 	if !ok {
 		return DailyForecast{}, errors.New("could not find table node")
 	}
 
 	daysNode, ok := htmlutil.Find(
 		tableNode,
-		htmlutil.WithAttributeValue("class", "forecast-table__row forecast-table-days"),
-		htmlutil.WithAttributeValue("data-row-name", "days"),
+		htmlutil.WithClassEquals("forecast-table__row forecast-table-days"),
+		htmlutil.WithAttributeEquals("data-row-name", "days"),
 	)
 	if !ok {
 		return DailyForecast{}, errors.New("could not find days node")
@@ -72,15 +72,15 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 	timeNode, ok := htmlutil.Find(
 		tableNode,
-		htmlutil.WithAttributeValue("class", "forecast-table__row forecast-table-time"),
-		htmlutil.WithAttributeValue("data-row-name", "time"),
+		htmlutil.WithClassEquals("forecast-table__row forecast-table-time"),
+		htmlutil.WithAttributeEquals("data-row-name", "time"),
 	)
 	if !ok {
 		return DailyForecast{}, errors.New("could not find time node")
 	}
 
 	if err := htmlutil.ForEach(timeNode, func(n *html.Node) error {
-		if htmlutil.AttributeContainsValue(n, "class", "forecast-table__cell") {
+		if htmlutil.ClassContains(n, "forecast-table__cell") {
 			hour, err := scrapeHour(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape hour: %w", err)
@@ -90,7 +90,7 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 				Hour: hour,
 			})
 
-			isDayEnd := htmlutil.AttributeContainsValue(n, "class", "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
 			if isDayEnd {
 				return htmlutil.ErrLoopStopped
 			}
@@ -102,8 +102,8 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 	ratingNode, ok := htmlutil.Find(
 		tableNode,
-		htmlutil.WithAttributeValue("class", "forecast-table__row forecast-table-rating"),
-		htmlutil.WithAttributeValue("data-row-name", "rating"),
+		htmlutil.WithClassEquals("forecast-table__row forecast-table-rating"),
+		htmlutil.WithAttributeEquals("data-row-name", "rating"),
 	)
 	if !ok {
 		return DailyForecast{}, errors.New("could not find rating node")
@@ -111,7 +111,7 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 	var i int
 	if err := htmlutil.ForEach(ratingNode, func(n *html.Node) error {
-		if htmlutil.AttributeContainsValue(n, "class", "forecast-table__cell") {
+		if htmlutil.ClassContains(n, "forecast-table__cell") {
 			ratingAttr, ok := htmlutil.Attribute(n.FirstChild, "alt")
 			if !ok {
 				return errors.New("could not find rating attribute")
@@ -126,7 +126,7 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 			i++
 
-			isDayEnd := htmlutil.AttributeContainsValue(n, "class", "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
 			if isDayEnd {
 				return htmlutil.ErrLoopStopped
 			}
@@ -138,8 +138,8 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 	waveHeightNode, ok := htmlutil.Find(
 		tableNode,
-		htmlutil.WithAttributeValue("class", "forecast-table__row"),
-		htmlutil.WithAttributeValue("data-row-name", "wave-height"),
+		htmlutil.WithClassEquals("forecast-table__row"),
+		htmlutil.WithAttributeEquals("data-row-name", "wave-height"),
 	)
 	if !ok {
 		return DailyForecast{}, errors.New("could not find wave height node")
@@ -147,7 +147,7 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 	i = 0
 	if err := htmlutil.ForEach(waveHeightNode, func(n *html.Node) error {
-		if htmlutil.AttributeContainsValue(n, "class", "forecast-table__cell") {
+		if htmlutil.ClassContains(n, "forecast-table__cell") {
 			swellAttr, ok := htmlutil.Attribute(n, "data-swell-state")
 			if !ok {
 				return errors.New("could not find swell attribute")
@@ -165,15 +165,15 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 
 				forecast.HourlyForecasts[i].Swells = append(forecast.HourlyForecasts[i].Swells, Swell{
 					PeriodInSeconds:    s.Period,
-					Angle:              s.Angle,
-					Letters:            s.Letters,
+					DirectionAngleInDegrees:              s.Angle,
+					DirectionCompassPoints:   s.Letters,
 					WaveHeightInMeters: s.Height,
 				})
 			}
 
 			i++
 
-			isDayEnd := htmlutil.AttributeContainsValue(n, "class", "is-day-end")
+			isDayEnd := htmlutil.ClassContains(n, "is-day-end")
 			if isDayEnd {
 				return htmlutil.ErrLoopStopped
 			}
@@ -202,13 +202,14 @@ type HourlyForecast struct {
 	Swells []Swell
 	// TODO wind
 	// TODO tide
+	// TODO energy
 }
 
 type Swell struct {
-	PeriodInSeconds    int
-	Angle              float64 // TODO rename to reflect unit of measurement
-	Letters            string  // TODO rename to reflect what these letters represent
-	WaveHeightInMeters float64
+	PeriodInSeconds         int
+	DirectionAngleInDegrees float64
+	DirectionCompassPoints  string
+	WaveHeightInMeters      float64
 }
 
 func scrapeDay(n *html.Node) (Day, error) {

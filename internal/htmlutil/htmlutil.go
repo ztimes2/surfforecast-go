@@ -7,6 +7,10 @@ import (
 	"golang.org/x/net/html"
 )
 
+const (
+	AttributeKeyClass = "class"
+)
+
 func Find(n *html.Node, conditions ...Condition) (*html.Node, bool) {
 	if doesMeetConditions(n, conditions...) {
 		return n, true
@@ -18,6 +22,7 @@ func Find(n *html.Node, conditions ...Condition) (*html.Node, bool) {
 			return target, true
 		}
 	}
+	
 	return nil, false
 }
 
@@ -32,13 +37,27 @@ func doesMeetConditions(n *html.Node, conditions ...Condition) bool {
 	return true
 }
 
-func WithAttributeValue(key, value string) Condition {
+func WithClassEquals(value string) Condition {
 	return func(n *html.Node) bool {
-		return AttributeEqualsValue(n, key, value)
+		return ClassEquals(n, value)
 	}
 }
 
-func AttributeEqualsValue(n *html.Node, key, value string) bool {
+func WithAttributeEquals(key, value string) Condition {
+	return func(n *html.Node) bool {
+		return AttributeEquals(n, key, value)
+	}
+}
+
+func ClassEquals(n *html.Node, value string) bool {
+	return AttributeEquals(n, AttributeKeyClass, value)
+}
+
+func ClassContains(n *html.Node, value string) bool {
+	return AttributeContains(n, AttributeKeyClass, value)
+}
+
+func AttributeEquals(n *html.Node, key, value string) bool {
 	attr, ok := Attribute(n, key)
 	if !ok {
 		return false
@@ -46,7 +65,7 @@ func AttributeEqualsValue(n *html.Node, key, value string) bool {
 	return attr.Val == value
 }
 
-func AttributeContainsValue(n *html.Node, key, value string) bool {
+func AttributeContains(n *html.Node, key, value string) bool {
 	attr, ok := Attribute(n, key)
 	if !ok {
 		return false
