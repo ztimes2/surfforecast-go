@@ -19,16 +19,18 @@ const (
 	classForecastTableBasic  = "forecast-table__basic"
 	classForecastTableRow    = "forecast-table__row"
 	classForecastTableCell   = "forecast-table__cell"
+	classForecastTableValue  = "forecast-table__value"
 	classForecastTableTime   = "forecast-table-time"
 	classForecastTableDays   = "forecast-table-days"
 	classForecastTableRating = "forecast-table-rating"
 	classIsDayEnd            = "is-day-end"
+	classWindIcon            = "wind-icon"
+	classWindLetters         = "wind-icon__letters"
+	classWindIconArrow       = "wind-icon__arrow"
 
-	attributeDataRowName        = "data-row-name"
-	attributeDataSwellState     = "data-swell-state"
-	attributeDataSpeed          = "data-speed"
-	attributeAlternateImageText = "alt"
-	attributeTransform          = "transform"
+	attributeDataRowName    = "data-row-name"
+	attributeDataSwellState = "data-swell-state"
+	attributeDataSpeed      = "data-speed"
 
 	dataRowNameDays       = "days"
 	dataRowNameTime       = "time"
@@ -91,7 +93,8 @@ func newDailyForecasts(
 	ratings [][]int,
 	swells [][]Swells,
 	waveEnergies [][]float64,
-	winds [][]Wind) ([]*DailyForecast, error) {
+	winds [][]wind,
+	windStates [][]string) ([]*DailyForecast, error) {
 
 	if len(days) != len(hours) {
 		return nil, errors.New("days and hours must have equal number of elements")
@@ -107,6 +110,9 @@ func newDailyForecasts(
 	}
 	if len(days) != len(winds) {
 		return nil, errors.New("days and winds must have equal number of elements")
+	}
+	if len(days) != len(windStates) {
+		return nil, errors.New("days and wind states must have equal number of elements")
 	}
 
 	var (
@@ -140,6 +146,7 @@ func newDailyForecasts(
 			swells[i],
 			waveEnergies[i],
 			winds[i],
+			windStates[i],
 		)
 		if err != nil {
 			return nil, fmt.Errorf("could not create forecast: %w", err)
@@ -161,7 +168,8 @@ func newDailyForecast(
 	ratings []int,
 	swells []Swells,
 	waveEnergies []float64,
-	winds []Wind) (*DailyForecast, error) {
+	winds []wind,
+	windStates []string) (*DailyForecast, error) {
 
 	if len(hours) != len(ratings) {
 		return nil, errors.New("hours and ratings must have equal number of elements")
@@ -182,7 +190,12 @@ func newDailyForecast(
 		forecasts[i].Rating = ratings[i]
 		forecasts[i].Swells = swells[i]
 		forecasts[i].WaveEnergyInKiloJoules = waveEnergies[i]
-		forecasts[i].Wind = winds[i]
+		forecasts[i].Wind = Wind{
+			SpeedInKilometersPerHour:     winds[i].speed,
+			DirectionToInDegrees:         winds[i].degrees,
+			DirectionFromInCompassPoints: winds[i].letters,
+			State:                        windStates[i],
+		}
 	}
 
 	return &DailyForecast{
@@ -222,7 +235,7 @@ func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast
 		return nil, fmt.Errorf("could not scrape issue date: %w", err)
 	}
 
-	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classForecastTableBasic))
+	tableNode, ok := htmlutil.FindOne(n, htmlutil.WithClassEqual(classForecastTableBasic))
 	if !ok {
 		return nil, errors.New("could not find table node")
 	}
@@ -257,6 +270,11 @@ func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast
 		return nil, fmt.Errorf("could not scrape winds: %w", err)
 	}
 
+	windStates, err := scrapeWindStates(tableNode)
+	if err != nil {
+		return nil, fmt.Errorf("could not scrape wind states: %w", err)
+	}
+
 	return newDailyForecasts(
 		issueDate,
 		days,
@@ -265,23 +283,24 @@ func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast
 		swells,
 		waveEnergies,
 		winds,
+		windStates,
 	)
 }
 
 func scrapeIssueDate(n *html.Node, tz *timezone.Timezone) (time.Time, error) {
-	container, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classBreakHeaderIssued))
+	issueNode, ok := htmlutil.FindOne(n, htmlutil.WithClassEqual(classBreakHeaderIssued))
 	if !ok {
-		return time.Time{}, errors.New("could not find issue container node")
+		return time.Time{}, errors.New("could not find issue node")
 	}
 
-	text := container.FirstChild
-	if text == nil {
+	issueTextNode := issueNode.FirstChild
+	if issueTextNode == nil {
 		return time.Time{}, errors.New("could not find issue text node")
 	}
 
-	parts := strings.Split(text.Data, " ")
+	parts := strings.Split(issueTextNode.Data, " ")
 	if len(parts) != 12 {
-		return time.Time{}, fmt.Errorf("unexpected issue text: %q", text.Data)
+		return time.Time{}, fmt.Errorf("unexpected issue text: %q", issueTextNode.Data)
 	}
 
 	dayText, monthText, yearText, tzAbbr := parts[8], parts[9], parts[10], parts[11]
@@ -365,7 +384,7 @@ func parseMonthShort(s string) (time.Month, error) {
 }
 
 func scrapeDays(n *html.Node) ([]int, error) {
-	daysNode, ok := htmlutil.Find(
+	daysNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableDays),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameDays),
@@ -393,31 +412,26 @@ func scrapeDays(n *html.Node) ([]int, error) {
 }
 
 func scrapeDay(n *html.Node) (int, error) {
-	container := n.LastChild
-	if container == nil {
-		return 0, errors.New("could not find day container node")
+	nodes := htmlutil.Find(n, htmlutil.WithClassEqual(classForecastTableValue))
+	if len(nodes) != 2 {
+		return 0, errors.New("unexpected table values")
 	}
 
-	monthDayContainer := container.LastChild
-	if monthDayContainer == nil {
-		return 0, errors.New("could not find month day container node")
+	dayTextNode := nodes[1].FirstChild
+	if dayTextNode == nil {
+		return 0, errors.New("could not find day text node")
 	}
 
-	monthDayText := monthDayContainer.FirstChild
-	if monthDayText == nil {
-		return 0, errors.New("could not find month day text node")
-	}
-
-	monthDay, err := parseDay(monthDayText.Data)
+	day, err := parseDay(dayTextNode.Data)
 	if err != nil {
-		return 0, fmt.Errorf("could not parse month day: %w", err)
+		return 0, fmt.Errorf("could not parse day: %w", err)
 	}
 
-	return monthDay, nil
+	return day, nil
 }
 
 func scrapeHours(n *html.Node) ([][]int, error) {
-	hoursNode, ok := htmlutil.Find(
+	hoursNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableTime),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameTime),
@@ -454,32 +468,27 @@ func scrapeHours(n *html.Node) ([][]int, error) {
 }
 
 func scrapeHour(n *html.Node) (int, error) {
-	hourContainer := n.FirstChild
-	if hourContainer == nil {
-		return 0, errors.New("could not find hour container node")
+	nodes := htmlutil.Find(n, htmlutil.WithClassEqual(classForecastTableValue))
+	if len(nodes) != 2 {
+		return 0, errors.New("unexpected table values")
 	}
 
-	hourText := hourContainer.FirstChild
-	if hourText == nil {
+	hourTextNode := nodes[0].FirstChild
+	if hourTextNode == nil {
 		return 0, errors.New("could not find hour text node")
 	}
 
-	hour, err := parseTwelveClockHour(hourText.Data)
+	hour, err := parseTwelveClockHour(hourTextNode.Data)
 	if err != nil {
 		return 0, fmt.Errorf("could not parse hour: %w", err)
 	}
 
-	periodContainer := n.LastChild
-	if periodContainer == nil {
-		return 0, errors.New("could not find clock period node")
-	}
-
-	periodText := periodContainer.FirstChild
-	if periodText == nil {
+	periodTextNode := nodes[1].FirstChild
+	if periodTextNode == nil {
 		return 0, errors.New("could not find clock period text node")
 	}
 
-	period, err := parseClockPeriod(periodText.Data)
+	period, err := parseClockPeriod(periodTextNode.Data)
 	if err != nil {
 		return 0, fmt.Errorf("could not parse clock period: %w", err)
 	}
@@ -508,7 +517,7 @@ const (
 )
 
 func parseClockPeriod(s string) (clockPeriod, error) {
-	switch s {
+	switch strings.ToUpper(s) {
 	case "AM":
 		return beforeMidday, nil
 	case "PM":
@@ -532,7 +541,7 @@ func toTwentyFourClockHour(hour int, p clockPeriod) int {
 }
 
 func scrapeRatings(n *html.Node) ([][]int, error) {
-	ratingsNode, ok := htmlutil.Find(
+	ratingsNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableRating),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameRating),
@@ -547,7 +556,7 @@ func scrapeRatings(n *html.Node) ([][]int, error) {
 	)
 	if err := htmlutil.ForEach(ratingsNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
-			ratingAttr, ok := htmlutil.Attribute(n.FirstChild, attributeAlternateImageText)
+			ratingAttr, ok := htmlutil.Attribute(n.FirstChild, htmlutil.AttributeAlternateImageText)
 			if !ok {
 				return errors.New("could not find rating attribute")
 			}
@@ -587,7 +596,7 @@ func parseRating(s string) (int, error) {
 }
 
 func scrapeSwells(n *html.Node) ([][]Swells, error) {
-	swellsNode, ok := htmlutil.Find(
+	swellsNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameWaveHeight),
@@ -668,7 +677,7 @@ type swell struct {
 }
 
 func scrapeWaveEnergies(n *html.Node) ([][]float64, error) {
-	energiesNode, ok := htmlutil.Find(
+	energiesNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameEnergy),
@@ -705,17 +714,17 @@ func scrapeWaveEnergies(n *html.Node) ([][]float64, error) {
 }
 
 func scrapeWaveEnergy(n *html.Node) (float64, error) {
-	container := n.FirstChild
-	if container == nil {
-		return 0, errors.New("could not find wave energy container node")
+	energyNode := n.FirstChild
+	if energyNode == nil {
+		return 0, errors.New("could not find wave energy node")
 	}
 
-	energyText := container.FirstChild
-	if energyText == nil {
+	energyTextNode := energyNode.FirstChild
+	if energyTextNode == nil {
 		return 0, errors.New("could not find wave energy text node")
 	}
 
-	energy, err := parseWaveEnergy(energyText.Data)
+	energy, err := parseWaveEnergy(energyTextNode.Data)
 	if err != nil {
 		return 0, fmt.Errorf("could not parse wave energy: %w", err)
 	}
@@ -736,8 +745,8 @@ func parseWaveEnergy(s string) (float64, error) {
 	return energy, nil
 }
 
-func scrapeWinds(n *html.Node) ([][]Wind, error) {
-	windsNode, ok := htmlutil.Find(
+func scrapeWinds(n *html.Node) ([][]wind, error) {
+	windsNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameWind),
@@ -747,22 +756,22 @@ func scrapeWinds(n *html.Node) ([][]Wind, error) {
 	}
 
 	var (
-		allWinds [][]Wind
-		winds    []Wind
+		allWinds [][]wind
+		winds    []wind
 	)
 	if err := htmlutil.ForEach(windsNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
-			wind, err := scrapeWind(n)
+			w, err := scrapeWind(n)
 			if err != nil {
 				return fmt.Errorf("could not scrape wind: %w", err)
 			}
 
-			winds = append(winds, wind)
+			winds = append(winds, w)
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
 				allWinds = append(allWinds, winds)
-				winds = []Wind{}
+				winds = []wind{}
 			}
 		}
 		return nil
@@ -770,81 +779,60 @@ func scrapeWinds(n *html.Node) ([][]Wind, error) {
 		return nil, err
 	}
 
-	states, err := scrapeWindStates(n)
-	if err != nil {
-		return nil, fmt.Errorf("could not scrapre first day wind states: %w", err)
-	}
-
-	if len(allWinds) != len(states) {
-		return nil, fmt.Errorf("winds and states must have equal number of elements")
-	}
-
-	// TODO validate len(allWinds[i]) != len(states[i])
-
-	for i := range allWinds {
-		for j := range allWinds[i] {
-			allWinds[i][j].State = states[i][j]
-		}
-	}
-
 	return allWinds, nil
 }
 
-func scrapeWind(n *html.Node) (Wind, error) {
-	container := n.FirstChild
-	if container == nil {
-		return Wind{}, errors.New("could not find wind container node")
+func scrapeWind(n *html.Node) (wind, error) {
+	iconNode, ok := htmlutil.FindOne(n, htmlutil.WithClassEqual(classWindIcon))
+	if !ok {
+		return wind{}, errors.New("could not find wind icon node")
 	}
 
-	speedAttr, ok := htmlutil.Attribute(container, attributeDataSpeed)
+	speedAttr, ok := htmlutil.Attribute(iconNode, attributeDataSpeed)
 	if !ok {
-		return Wind{}, errors.New("could not find wind speed attribute")
+		return wind{}, errors.New("could not find wind speed attribute")
 	}
 
 	speed, err := parseWindSpeed(speedAttr.Val)
 	if err != nil {
-		return Wind{}, fmt.Errorf("could not parse wind speed: %w", err)
+		return wind{}, fmt.Errorf("could not parse wind speed: %w", err)
 	}
 
-	degrees, err := scrapeWindDirectionDegrees(container)
+	degrees, err := scrapeWindDirectionDegrees(iconNode)
 	if err != nil {
-		return Wind{}, fmt.Errorf("could not scrape wind direction degrees: %w", err)
+		return wind{}, fmt.Errorf("could not scrape wind direction degrees: %w", err)
 	}
 
-	compassContainer := container.LastChild
-	if compassContainer == nil {
-		return Wind{}, errors.New("could not find wind direction compass container node")
+	lettersNode, ok := htmlutil.FindOne(iconNode, htmlutil.WithClassEqual(classWindLetters))
+	if !ok {
+		return wind{}, errors.New("could not find wind direction letters node")
 	}
 
-	compassText := compassContainer.FirstChild
-	if compassText == nil {
-		return Wind{}, errors.New("could not find wind direction compass text node")
+	lettersTextNode := lettersNode.FirstChild
+	if lettersTextNode == nil {
+		return wind{}, errors.New("could not find wind direction letters text node")
 	}
 
-	return Wind{
-		SpeedInKilometersPerHour:     speed,
-		DirectionToInDegrees:         degrees,
-		DirectionFromInCompassPoints: compassText.Data,
+	return wind{
+		speed:   speed,
+		degrees: degrees,
+		letters: lettersTextNode.Data,
 	}, nil
 }
 
+type wind struct {
+	speed   float64
+	degrees float64
+	letters string
+}
+
 func scrapeWindDirectionDegrees(n *html.Node) (float64, error) {
-	container := n.FirstChild
-	if container == nil {
-		return 0, errors.New("could not find wind direction degrees container")
-	}
-
-	circle := container.FirstChild
-	if circle == nil {
-		return 0, errors.New("could not find wind direction circle node")
-	}
-
-	arrow := circle.NextSibling
-	if arrow == nil {
+	arrowNode, ok := htmlutil.FindOne(n, htmlutil.WithClassEqual(classWindIconArrow))
+	if !ok {
 		return 0, errors.New("could not find wind direction arrow node")
 	}
 
-	attr, ok := htmlutil.Attribute(arrow, attributeTransform)
+	attr, ok := htmlutil.Attribute(arrowNode, htmlutil.AttributeTransform)
 	if !ok {
 		return 0, errors.New("could not find transform attribute")
 	}
@@ -887,7 +875,7 @@ func parseWindSpeed(s string) (float64, error) {
 }
 
 func scrapeWindStates(n *html.Node) ([][]string, error) {
-	statesNode, ok := htmlutil.Find(
+	statesNode, ok := htmlutil.FindOne(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameWindState),

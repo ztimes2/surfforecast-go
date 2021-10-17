@@ -7,16 +7,32 @@ import (
 )
 
 const (
-	AttributeKeyClass = "class"
+	AttributeClass              = "class"
+	AttributeAlternateImageText = "alt"
+	AttributeTransform          = "transform"
 )
 
-func Find(n *html.Node, conditions ...FindCondition) (*html.Node, bool) {
+func Find(n *html.Node, conditions ...FindCondition) []*html.Node {
+	var targets []*html.Node
+
+	if matchesConditions(n, conditions...) {
+		targets = append(targets, n)
+	}
+
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		targets = append(targets, Find(c, conditions...)...)
+	}
+
+	return targets
+}
+
+func FindOne(n *html.Node, conditions ...FindCondition) (*html.Node, bool) {
 	if matchesConditions(n, conditions...) {
 		return n, true
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		target, ok := Find(c, conditions...)
+		target, ok := FindOne(c, conditions...)
 		if ok {
 			return target, true
 		}
@@ -54,13 +70,20 @@ func WithAttributeEqual(key, value string) FindCondition {
 	}
 }
 
+func WithAttribute(key string) FindCondition {
+	return func(n *html.Node) bool {
+		_, ok := Attribute(n, key)
+		return ok
+	}
+}
+
 func ClassEquals(n *html.Node, value string) bool {
-	return AttributeEquals(n, AttributeKeyClass, value)
+	return AttributeEquals(n, AttributeClass, value)
 }
 
 func ClassContains(n *html.Node, values ...string) bool {
 	for _, v := range values {
-		if !AttributeContains(n, AttributeKeyClass, v) {
+		if !AttributeContains(n, AttributeClass, v) {
 			return false
 		}
 	}
@@ -101,11 +124,9 @@ func ForEach(n *html.Node, statement ForEachStatement) error {
 		if err := ForEach(c, statement); err != nil {
 			return err
 		}
-	} 
-	
-	return nil 
+	}
+
+	return nil
 }
 
 type ForEachStatement func(*html.Node) error
-
-
