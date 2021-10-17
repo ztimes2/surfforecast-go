@@ -101,7 +101,9 @@ func ForEach(n *html.Node, statement ForEachStatement) error {
 		if err := ForEach(c, statement); err != nil {
 			return err
 		}
-	} return nil 
+	} 
+	
+	return nil 
 }
 
 type ForEachStatement func(*html.Node) error
