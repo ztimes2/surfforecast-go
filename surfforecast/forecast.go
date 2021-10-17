@@ -133,17 +133,17 @@ type HourlyForecast struct {
 }
 
 type Swell struct {
-	PeriodInSeconds          float64
-	DirectionInDegrees       float64
-	DirectionInCompassPoints string
-	WaveHeightInMeters       float64
+	PeriodInSeconds              float64
+	DirectionToInDegrees         float64
+	DirectionFromInCompassPoints string
+	WaveHeightInMeters           float64
 }
 
 type Wind struct {
-	SpeedInKilometersPerHour float64
-	DirectionInDegrees       float64
-	DirectionInCompassPoints string
-	State                    string
+	SpeedInKilometersPerHour     float64
+	DirectionToInDegrees         float64
+	DirectionFromInCompassPoints string
+	State                        string
 }
 
 func scrapeDailyForecast(n *html.Node, tz *timezone.Timezone) (DailyForecast, error) {
@@ -563,10 +563,10 @@ func unmarshalSwells(b []byte) ([]Swell, error) {
 		}
 
 		swells = append(swells, Swell{
-			PeriodInSeconds:          p.Period,
-			DirectionInDegrees:       p.Angle,
-			DirectionInCompassPoints: p.Letters,
-			WaveHeightInMeters:       p.Height,
+			PeriodInSeconds:              p.Period,
+			DirectionToInDegrees:         p.Angle,
+			DirectionFromInCompassPoints: p.Letters,
+			WaveHeightInMeters:           p.Height,
 		})
 	}
 
@@ -723,9 +723,9 @@ func scrapeWind(n *html.Node) (Wind, error) {
 	}
 
 	return Wind{
-		SpeedInKilometersPerHour: speed,
-		DirectionInDegrees:       degrees,
-		DirectionInCompassPoints: compassText.Data,
+		SpeedInKilometersPerHour:     speed,
+		DirectionToInDegrees:         degrees,
+		DirectionFromInCompassPoints: compassText.Data,
 	}, nil
 }
 
