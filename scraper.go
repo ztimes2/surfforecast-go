@@ -10,26 +10,26 @@ import (
 const (
 	baseURL = "https://www.surf-forecast.com"
 
-	endpointFormatDailyForecast  = "/breaks/%s/forecasts/latest"
-	endpointFormatWeeklyForecast = "/breaks/%s/forecasts/latest/six_days"
+	pathFormatForecastsForEightDays  = "/breaks/%s/forecasts/latest"
+	pathFormatForecastsForTwelveDays = "/breaks/%s/forecasts/latest/six_days"
 )
 
 const (
 	defaultRequestTimeout = 10 * time.Second
 )
 
-type Client struct {
+type Scraper struct {
 	httpClient *http.Client
 	timezones  *timezone.Timezone
 }
 
-func New(opts ...Option) *Client {
+func New(opts ...Option) *Scraper {
 	var o Options
 	for _, opt := range opts {
 		opt(&o)
 	}
 
-	return &Client{
+	return &Scraper{
 		httpClient: o.resolveHTTPClient(),
 		timezones:  timezone.New(),
 	}

@@ -44,93 +44,163 @@ const (
 
 var ErrBreakNotFound = errors.New("break not found")
 
-func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
+func (c *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, error) {
 	// TODO enable context propogation and cancelation
 	// TODO use chromedp to dynamically expand first day's forecast
 
-	req, err := newRequest(http.MethodGet, fmt.Sprintf(endpointFormatDailyForecast, breakName))
+	req, err := newRequest(http.MethodGet, fmt.Sprintf(pathFormatForecastsForEightDays, breakName))
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not prepare request: %w", err)
+		return nil, fmt.Errorf("could not prepare request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not send request: %w", err)
+		return nil, fmt.Errorf("could not send request: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return DailyForecast{}, ErrBreakNotFound
+			return nil, ErrBreakNotFound
 		}
-		return DailyForecast{}, fmt.Errorf("received response with %d status code", resp.StatusCode)
+		return nil, fmt.Errorf("received response with %d status code", resp.StatusCode)
 	}
 
 	defer resp.Body.Close()
 	node, err := html.Parse(resp.Body)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not parse response as html: %w", err)
+		return nil, fmt.Errorf("could not parse response as html: %w", err)
 	}
 
-	forecast, err := scrapeDailyForecast(node, c.timezones)
+	forecasts, err := scrapeDailyForecasts(node, c.timezones)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape html: %w", err)
+		return nil, fmt.Errorf("could not scrape html: %w", err)
 	}
 
-	return forecast, nil
+	return forecasts, nil
 }
 
 type DailyForecast struct {
-	Date            time.Time
+	TimestampLocal  time.Time
 	HourlyForecasts []HourlyForecast
 }
 
-func newDailyForecast(
+func newDailyForecasts(
 	issueDate time.Time,
+	days []int,
+	hours [][]int,
+	ratings [][]int,
+	swells [][]Swells,
+	waveEnergies [][]float64,
+	winds [][]Wind) ([]*DailyForecast, error) {
+
+	if len(days) != len(hours) {
+		return nil, errors.New("days and hours must have equal number of elements")
+	}
+	if len(days) != len(ratings) {
+		return nil, errors.New("days and ratings must have equal number of elements")
+	}
+	if len(days) != len(swells) {
+		return nil, errors.New("days and swells must have equal number of elements")
+	}
+	if len(days) != len(waveEnergies) {
+		return nil, errors.New("days and wave energies must have equal number of elements")
+	}
+	if len(days) != len(winds) {
+		return nil, errors.New("days and winds must have equal number of elements")
+	}
+
+	var (
+		forecasts = make([]*DailyForecast, len(days))
+		year      = issueDate.Year()
+		month     = issueDate.Month()
+
+		previous *DailyForecast
+	)
+	for i := range forecasts {
+		if previous != nil {
+			if previous.TimestampLocal.Day() > days[i] {
+				if month+1 > time.December {
+					month = time.January
+				}
+				month++
+			}
+
+			if previous.TimestampLocal.Month() > month {
+				year++
+			}
+		}
+
+		f, err := newDailyForecast(
+			issueDate.Location(),
+			issueDate.Year(),
+			month,
+			days[i],
+			hours[i],
+			ratings[i],
+			swells[i],
+			waveEnergies[i],
+			winds[i],
+		)
+		if err != nil {
+			return nil, fmt.Errorf("could not create forecast: %w", err)
+		}
+
+		forecasts[i] = f
+		previous = f
+	}
+
+	return forecasts, nil
+}
+
+func newDailyForecast(
+	l *time.Location,
+	year int,
+	month time.Month,
 	day int,
 	hours []int,
 	ratings []int,
-	swells [][]Swell,
+	swells []Swells,
 	waveEnergies []float64,
-	winds []Wind) (DailyForecast, error) {
+	winds []Wind) (*DailyForecast, error) {
 
 	if len(hours) != len(ratings) {
-		return DailyForecast{}, errors.New("hours and ratings must have equal number of elements")
+		return nil, errors.New("hours and ratings must have equal number of elements")
 	}
 	if len(hours) != len(swells) {
-		return DailyForecast{}, errors.New("hours and swells must have equal number of elements")
+		return nil, errors.New("hours and swells must have equal number of elements")
 	}
 	if len(hours) != len(waveEnergies) {
-		return DailyForecast{}, errors.New("hours and wave energies must have equal number of elements")
+		return nil, errors.New("hours and wave energies must have equal number of elements")
 	}
 	if len(hours) != len(winds) {
-		return DailyForecast{}, errors.New("hours and winds must have equal number of elements")
+		return nil, errors.New("hours and winds must have equal number of elements")
 	}
 
-	date := time.Date(issueDate.Year(), issueDate.Month(), day, 0, 0, 0, 0, issueDate.Location())
-
-	hourlyForecasts := make([]HourlyForecast, len(hours))
-	for i := range hourlyForecasts {
-		hourlyForecasts[i].Date = time.Date(date.Year(), date.Month(), date.Day(), hours[i], 0, 0, 0, date.Location())
-		hourlyForecasts[i].Rating = ratings[i]
-		hourlyForecasts[i].Swells = swells[i]
-		hourlyForecasts[i].WaveEnergyInKiloJoules = waveEnergies[i]
-		hourlyForecasts[i].Wind = winds[i]
+	forecasts := make([]HourlyForecast, len(hours))
+	for i := range forecasts {
+		forecasts[i].TimestampLocal = time.Date(year, month, day, hours[i], 0, 0, 0, l)
+		forecasts[i].Rating = ratings[i]
+		forecasts[i].Swells = swells[i]
+		forecasts[i].WaveEnergyInKiloJoules = waveEnergies[i]
+		forecasts[i].Wind = winds[i]
 	}
 
-	return DailyForecast{
-		Date:            date,
-		HourlyForecasts: hourlyForecasts,
+	return &DailyForecast{
+		TimestampLocal:  time.Date(year, month, day, 0, 0, 0, 0, l),
+		HourlyForecasts: forecasts,
 	}, nil
 }
 
 type HourlyForecast struct {
-	Date                   time.Time
+	TimestampLocal         time.Time
 	Rating                 int
-	Swells                 []Swell
+	Swells                 Swells
 	WaveEnergyInKiloJoules float64
 	Wind                   Wind
 	// TODO tide
 }
+
+type Swells []Swell
 
 type Swell struct {
 	PeriodInSeconds              float64
@@ -146,55 +216,55 @@ type Wind struct {
 	State                        string
 }
 
-func scrapeDailyForecast(n *html.Node, tz *timezone.Timezone) (DailyForecast, error) {
+func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast, error) {
 	issueDate, err := scrapeIssueDate(n, tz)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape issue date: %w", err)
+		return nil, fmt.Errorf("could not scrape issue date: %w", err)
 	}
 
 	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classForecastTableBasic))
 	if !ok {
-		return DailyForecast{}, errors.New("could not find table node")
+		return nil, errors.New("could not find table node")
 	}
 
-	firstDay, err := scrapeFirstDay(tableNode)
+	days, err := scrapeDays(tableNode)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape first day: %w", err)
+		return nil, fmt.Errorf("could not scrape days: %w", err)
 	}
 
-	firstDayHours, err := scrapeFirstDayHours(tableNode)
+	hours, err := scrapeHours(tableNode)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape first day hours: %w", err)
+		return nil, fmt.Errorf("could not scrape hours: %w", err)
 	}
 
-	firstDayRatings, err := scrapeFirstDayRatings(tableNode)
+	ratings, err := scrapeRatings(tableNode)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape first day ratings: %w", err)
+		return nil, fmt.Errorf("could not scrape ratings: %w", err)
 	}
 
-	firstDaySwells, err := scrapeFirstDaySwells(tableNode)
+	swells, err := scrapeSwells(tableNode)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape first day swells: %w", err)
+		return nil, fmt.Errorf("could not scrape swells: %w", err)
 	}
 
-	firstDayWaveEnergies, err := scrapeFirstDayWaveEnergies(tableNode)
+	waveEnergies, err := scrapeWaveEnergies(tableNode)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape first day wave energies: %w", err)
+		return nil, fmt.Errorf("could not scrape wave energies: %w", err)
 	}
 
-	firstDayWinds, err := scrapeFirstDayWinds(tableNode)
+	winds, err := scrapeWinds(tableNode)
 	if err != nil {
-		return DailyForecast{}, fmt.Errorf("could not scrape first day winds: %w", err)
+		return nil, fmt.Errorf("could not scrape winds: %w", err)
 	}
 
-	return newDailyForecast(
+	return newDailyForecasts(
 		issueDate,
-		firstDay,
-		firstDayHours,
-		firstDayRatings,
-		firstDaySwells,
-		firstDayWaveEnergies,
-		firstDayWinds,
+		days,
+		hours,
+		ratings,
+		swells,
+		waveEnergies,
+		winds,
 	)
 }
 
@@ -294,27 +364,32 @@ func parseMonthShort(s string) (time.Month, error) {
 	}
 }
 
-func scrapeFirstDay(n *html.Node) (int, error) {
+func scrapeDays(n *html.Node) ([]int, error) {
 	daysNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableDays),
 		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameDays),
 	)
 	if !ok {
-		return 0, errors.New("could not find days node")
+		return nil, errors.New("could not find days node")
 	}
 
-	firstDayNode := daysNode.FirstChild
-	if firstDayNode == nil {
-		return 0, errors.New("could not find first day node")
+	var days []int
+	if err := htmlutil.ForEach(daysNode, func(n *html.Node) error {
+		if htmlutil.ClassContains(n, classForecastTableCell) {
+			day, err := scrapeDay(n)
+			if err != nil {
+				return fmt.Errorf("could not scrape day: %w", err)
+			}
+
+			days = append(days, day)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
-	firstDay, err := scrapeDay(firstDayNode)
-	if err != nil {
-		return 0, fmt.Errorf("could not scrape day: %w", err)
-	}
-
-	return firstDay, nil
+	return days, nil
 }
 
 func scrapeDay(n *html.Node) (int, error) {
@@ -341,7 +416,7 @@ func scrapeDay(n *html.Node) (int, error) {
 	return monthDay, nil
 }
 
-func scrapeFirstDayHours(n *html.Node) ([]int, error) {
+func scrapeHours(n *html.Node) ([][]int, error) {
 	hoursNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableTime),
@@ -351,7 +426,10 @@ func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 		return nil, errors.New("could not find hours node")
 	}
 
-	var hours []int
+	var (
+		allHours [][]int
+		hours    []int
+	)
 	if err := htmlutil.ForEach(hoursNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
 			hour, err := scrapeHour(n)
@@ -363,15 +441,16 @@ func scrapeFirstDayHours(n *html.Node) ([]int, error) {
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
-				return htmlutil.ErrForEachStopped
+				allHours = append(allHours, hours)
+				hours = []int{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape hours: %w", err)
+		return nil, err
 	}
 
-	return hours, nil
+	return allHours, nil
 }
 
 func scrapeHour(n *html.Node) (int, error) {
@@ -452,7 +531,7 @@ func toTwentyFourClockHour(hour int, p clockPeriod) int {
 	return hour + 12
 }
 
-func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
+func scrapeRatings(n *html.Node) ([][]int, error) {
 	ratingsNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableRating),
@@ -462,7 +541,10 @@ func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
 		return nil, errors.New("could not find ratings node")
 	}
 
-	var ratings []int
+	var (
+		allRatings [][]int
+		ratings    []int
+	)
 	if err := htmlutil.ForEach(ratingsNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
 			ratingAttr, ok := htmlutil.Attribute(n.FirstChild, attributeAlternateImageText)
@@ -479,15 +561,16 @@ func scrapeFirstDayRatings(n *html.Node) ([]int, error) {
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
-				return htmlutil.ErrForEachStopped
+				allRatings = append(allRatings, ratings)
+				ratings = []int{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape ratings: %w", err)
+		return nil, err
 	}
 
-	return ratings, nil
+	return allRatings, nil
 }
 
 func parseRating(s string) (int, error) {
@@ -503,7 +586,7 @@ func parseRating(s string) (int, error) {
 	return rating, nil
 }
 
-func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
+func scrapeSwells(n *html.Node) ([][]Swells, error) {
 	swellsNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
@@ -513,7 +596,10 @@ func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 		return nil, errors.New("could not find swells node")
 	}
 
-	var swells [][]Swell
+	var (
+		allSwells [][]Swells
+		swells    []Swells
+	)
 	if err := htmlutil.ForEach(swellsNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
 			hourlySwells, err := scrapeHourlySwells(n)
@@ -525,15 +611,16 @@ func scrapeFirstDaySwells(n *html.Node) ([][]Swell, error) {
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
-				return htmlutil.ErrForEachStopped
+				allSwells = append(allSwells, swells)
+				swells = []Swells{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape swells: %w", err)
+		return nil, err
 	}
 
-	return swells, nil
+	return allSwells, nil
 }
 
 func scrapeHourlySwells(n *html.Node) ([]Swell, error) {
@@ -580,7 +667,7 @@ type swell struct {
 	Height  float64 `json:"height"`
 }
 
-func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
+func scrapeWaveEnergies(n *html.Node) ([][]float64, error) {
 	energiesNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
@@ -590,7 +677,10 @@ func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
 		return nil, errors.New("could not find wave energies node")
 	}
 
-	var energies []float64
+	var (
+		allEnergies [][]float64
+		energies    []float64
+	)
 	if err := htmlutil.ForEach(energiesNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
 			energy, err := scrapeWaveEnergy(n)
@@ -602,15 +692,16 @@ func scrapeFirstDayWaveEnergies(n *html.Node) ([]float64, error) {
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
-				return htmlutil.ErrForEachStopped
+				allEnergies = append(allEnergies, energies)
+				energies = []float64{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape wave energies: %w", err)
+		return nil, err
 	}
 
-	return energies, nil
+	return allEnergies, nil
 }
 
 func scrapeWaveEnergy(n *html.Node) (float64, error) {
@@ -645,7 +736,7 @@ func parseWaveEnergy(s string) (float64, error) {
 	return energy, nil
 }
 
-func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
+func scrapeWinds(n *html.Node) ([][]Wind, error) {
 	windsNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
@@ -655,7 +746,10 @@ func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
 		return nil, errors.New("could not find winds node")
 	}
 
-	var winds []Wind
+	var (
+		allWinds [][]Wind
+		winds    []Wind
+	)
 	if err := htmlutil.ForEach(windsNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
 			wind, err := scrapeWind(n)
@@ -667,28 +761,33 @@ func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
-				return htmlutil.ErrForEachStopped
+				allWinds = append(allWinds, winds)
+				winds = []Wind{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape winds: %w", err)
+		return nil, err
 	}
 
-	states, err := scrapeFirstDayWindStates(n)
+	states, err := scrapeWindStates(n)
 	if err != nil {
 		return nil, fmt.Errorf("could not scrapre first day wind states: %w", err)
 	}
 
-	if len(winds) != len(states) {
+	if len(allWinds) != len(states) {
 		return nil, fmt.Errorf("winds and states must have equal number of elements")
 	}
 
-	for i := range winds {
-		winds[i].State = states[i]
+	// TODO validate len(allWinds[i]) != len(states[i])
+
+	for i := range allWinds {
+		for j := range allWinds[i] {
+			allWinds[i][j].State = states[i][j]
+		}
 	}
 
-	return winds, nil
+	return allWinds, nil
 }
 
 func scrapeWind(n *html.Node) (Wind, error) {
@@ -787,7 +886,7 @@ func parseWindSpeed(s string) (float64, error) {
 	return speed, nil
 }
 
-func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
+func scrapeWindStates(n *html.Node) ([][]string, error) {
 	statesNode, ok := htmlutil.Find(
 		n,
 		htmlutil.WithClassEqual(classForecastTableRow),
@@ -797,7 +896,10 @@ func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
 		return nil, errors.New("could not find wind states node")
 	}
 
-	var states []string
+	var (
+		allStates [][]string
+		states    []string
+	)
 	if err := htmlutil.ForEach(statesNode, func(n *html.Node) error {
 		if htmlutil.ClassContains(n, classForecastTableCell) {
 			state, err := scrapeWindState(n)
@@ -809,15 +911,16 @@ func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
-				return htmlutil.ErrForEachStopped
+				allStates = append(allStates, states)
+				states = []string{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape wind states: %w", err)
+		return nil, err
 	}
 
-	return states, nil
+	return allStates, nil
 }
 
 func scrapeWindState(n *html.Node) (string, error) {
