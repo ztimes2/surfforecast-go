@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	pathFormatForecastsForEightDays = "/breaks/%s/forecasts/latest"
+)
+
+const (
 	classBreakHeaderIssued   = "break-header__issued"
 	classForecastTableBasic  = "forecast-table__basic"
 	classForecastTableRow    = "forecast-table__row"
@@ -46,16 +50,18 @@ const (
 
 var ErrBreakNotFound = errors.New("break not found")
 
-func (c *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, error) {
+func (s *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, error) {
 	// TODO enable context propogation and cancelation
 	// TODO use chromedp to dynamically expand first day's forecast
 
-	req, err := newRequest(http.MethodGet, fmt.Sprintf(pathFormatForecastsForEightDays, breakName))
+	path := fmt.Sprintf(pathFormatForecastsForEightDays, breakName)
+
+	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("could not send request: %w", err)
 	}
@@ -73,7 +79,7 @@ func (c *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, err
 		return nil, fmt.Errorf("could not parse response as html: %w", err)
 	}
 
-	forecasts, err := scrapeDailyForecasts(node, c.timezones)
+	forecasts, err := scrapeDailyForecasts(node, s.timezones)
 	if err != nil {
 		return nil, fmt.Errorf("could not scrape html: %w", err)
 	}

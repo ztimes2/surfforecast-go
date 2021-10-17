@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	ff, err := surfforecast.New().ForecastsForEightDays("Cherating")
+	ff, err := surfforecast.New().ForecastsForEightDays("cherating")
 	if err != nil {
 		panic(err)
 	}

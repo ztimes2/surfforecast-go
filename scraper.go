@@ -9,9 +9,6 @@ import (
 
 const (
 	baseURL = "https://www.surf-forecast.com"
-
-	pathFormatForecastsForEightDays  = "/breaks/%s/forecasts/latest"
-	pathFormatForecastsForTwelveDays = "/breaks/%s/forecasts/latest/six_days"
 )
 
 const (
@@ -49,8 +46,4 @@ func (o Options) resolveHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: defaultRequestTimeout,
 	}
-}
-
-func newRequest(method, path string) (*http.Request, error) {
-	return http.NewRequest(method, baseURL+path, nil)
 }
