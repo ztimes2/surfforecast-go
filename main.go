@@ -22,6 +22,7 @@ func main() {
 		fmt.Printf("Rating (0-10): %d\n", hf.Rating)
 		fmt.Printf("Wave energy (kJ): %v\n", hf.WaveEnergyInKiloJoules)
 		fmt.Printf("Wind speed (km/h): %v\n", hf.Wind.SpeedInKilometersPerHour)
+		fmt.Printf("Wind direction (degrees): %v\n", hf.Wind.DirectionInDegrees)
 		fmt.Printf("Wind direction (compass points): %s\n", hf.Wind.DirectionInCompassPoints)
 		fmt.Printf("Wind state: %s\n", hf.Wind.State)
 

@@ -25,16 +25,20 @@ const (
 
 	attributeDataRowName        = "data-row-name"
 	attributeDataSwellState     = "data-swell-state"
-	attributeDataSpeed =  "data-speed"
+	attributeDataSpeed          = "data-speed"
 	attributeAlternateImageText = "alt"
+	attributeTransform          = "transform"
 
 	dataRowNameDays       = "days"
 	dataRowNameTime       = "time"
 	dataRowNameRating     = "rating"
 	dataRowNameWaveHeight = "wave-height"
-	dataRowNameEnergy =  "energy"
-	dataRowNameWind = "wind"
-	dataRowNameWindState = "wind-state"
+	dataRowNameEnergy     = "energy"
+	dataRowNameWind       = "wind"
+	dataRowNameWindState  = "wind-state"
+
+	transformRotatePrefix = "rotate("
+	transformRotateSuffix = ")"
 )
 
 var ErrBreakNotFound = errors.New("break not found")
@@ -138,9 +142,9 @@ type Swell struct {
 
 type Wind struct {
 	SpeedInKilometersPerHour float64
+	DirectionInDegrees       float64
 	DirectionInCompassPoints string
 	State                    string
-	// TODO direction in degrees
 }
 
 func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
@@ -636,7 +640,7 @@ func scrapeFirstDayWinds(n *html.Node) ([]Wind, error) {
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("could not scrape wave energies: %w", err)
+		return nil, fmt.Errorf("could not scrape winds: %w", err)
 	}
 
 	states, err := scrapeFirstDayWindStates(n)
@@ -671,33 +675,84 @@ func scrapeWind(n *html.Node) (Wind, error) {
 		return Wind{}, fmt.Errorf("could not parse wind speed: %w", err)
 	}
 
-	directionContainer := container.LastChild
-	if directionContainer == nil {
-		return Wind{}, errors.New("could not find wind direction container node")
+	degrees, err := scrapeWindDirectionDegrees(container)
+	if err != nil {
+		return Wind{}, fmt.Errorf("could not scrape wind direction degrees: %w", err)
 	}
 
-	directionText := directionContainer.FirstChild
-	if directionText == nil {
-		return Wind{}, errors.New("could not find wind direction text node")
+	compassContainer := container.LastChild
+	if compassContainer == nil {
+		return Wind{}, errors.New("could not find wind direction compass container node")
+	}
+
+	compassText := compassContainer.FirstChild
+	if compassText == nil {
+		return Wind{}, errors.New("could not find wind direction compass text node")
 	}
 
 	return Wind{
 		SpeedInKilometersPerHour: speed,
-		DirectionInCompassPoints: directionText.Data,
+		DirectionInDegrees:       degrees,
+		DirectionInCompassPoints: compassText.Data,
 	}, nil
 }
 
-func parseWindSpeed(s string) (float64, error) {
-	wind, err := strconv.ParseFloat(s, 64)
+func scrapeWindDirectionDegrees(n *html.Node) (float64, error) {
+	container := n.FirstChild
+	if container == nil {
+		return 0, errors.New("could not find wind direction degrees container")
+	}
+
+	circle := container.FirstChild
+	if circle == nil {
+		return 0, errors.New("could not find wind direction circle node")
+	}
+
+	arrow := circle.NextSibling
+	if arrow == nil {
+		return 0, errors.New("could not find wind direction arrow node")
+	}
+
+	attr, ok := htmlutil.Attribute(arrow, attributeTransform)
+	if !ok {
+		return 0, errors.New("could not find transform attribute")
+	}
+
+	degreesText := strings.TrimPrefix(attr.Val, transformRotatePrefix)
+	degreesText = strings.TrimSuffix(degreesText, transformRotateSuffix)
+
+	degrees, err := parseWindDirectionDegrees(degreesText)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse wind direction degrees: %w", err)
+	}
+
+	return degrees, nil
+}
+
+func parseWindDirectionDegrees(s string) (float64, error) {
+	degrees, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return 0, fmt.Errorf("not float: %q", s)
 	}
 
-	if wind < 0 {
+	if degrees < 0 || degrees > 360 {
+		return 0, fmt.Errorf("invalid wind direction degrees: %q", s)
+	}
+
+	return degrees, nil
+}
+
+func parseWindSpeed(s string) (float64, error) {
+	speed, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("not float: %q", s)
+	}
+
+	if speed < 0 {
 		return 0, fmt.Errorf("invalid wind speed: %q", s)
 	}
 
-	return wind, nil
+	return speed, nil
 }
 
 func scrapeFirstDayWindStates(n *html.Node) ([]string, error) {
