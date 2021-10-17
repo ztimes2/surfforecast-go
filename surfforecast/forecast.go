@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tkuchiki/go-timezone"
 	"github.com/ztimes2/surfforecast-go/internal/htmlutil"
 	"golang.org/x/net/html"
 )
@@ -70,7 +71,7 @@ func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
 		return DailyForecast{}, fmt.Errorf("could not parse response as html: %w", err)
 	}
 
-	forecast, err := scrapeDailyForecast(node)
+	forecast, err := scrapeDailyForecast(node, c.timezones)
 	if err != nil {
 		return DailyForecast{}, fmt.Errorf("could not scrape html: %w", err)
 	}
@@ -79,12 +80,13 @@ func (c *Client) DailyForecast(breakName string) (DailyForecast, error) {
 }
 
 type DailyForecast struct {
-	Day             Day // TODO convert to time.Time
+	Date            time.Time
 	HourlyForecasts []HourlyForecast
 }
 
 func newDailyForecast(
-	day Day,
+	issueDate time.Time,
+	day int,
 	hours []int,
 	ratings []int,
 	swells [][]Swell,
@@ -104,9 +106,11 @@ func newDailyForecast(
 		return DailyForecast{}, errors.New("hours and winds must have equal number of elements")
 	}
 
+	date := time.Date(issueDate.Year(), issueDate.Month(), day, 0, 0, 0, 0, issueDate.Location())
+
 	hourlyForecasts := make([]HourlyForecast, len(hours))
 	for i := range hourlyForecasts {
-		hourlyForecasts[i].Hour = hours[i]
+		hourlyForecasts[i].Date = time.Date(date.Year(), date.Month(), date.Day(), hours[i], 0, 0, 0, date.Location())
 		hourlyForecasts[i].Rating = ratings[i]
 		hourlyForecasts[i].Swells = swells[i]
 		hourlyForecasts[i].WaveEnergyInKiloJoules = waveEnergies[i]
@@ -114,18 +118,13 @@ func newDailyForecast(
 	}
 
 	return DailyForecast{
-		Day:             day,
+		Date:            date,
 		HourlyForecasts: hourlyForecasts,
 	}, nil
 }
 
-type Day struct {
-	Weekday  time.Weekday
-	MonthDay int
-}
-
 type HourlyForecast struct {
-	Hour                   int // TODO convert to time.Time
+	Date                   time.Time
 	Rating                 int
 	Swells                 []Swell
 	WaveEnergyInKiloJoules float64
@@ -147,23 +146,11 @@ type Wind struct {
 	State                    string
 }
 
-func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
-	issueDateNode, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classBreakHeaderIssued))
-	if !ok {
-		return DailyForecast{}, errors.New("could not find issue date node")
+func scrapeDailyForecast(n *html.Node, tz *timezone.Timezone) (DailyForecast, error) {
+	issueDate, err := scrapeIssueDate(n, tz)
+	if err != nil {
+		return DailyForecast{}, fmt.Errorf("could not scrape issue date: %w", err)
 	}
-
-	issueDateText := issueDateNode.FirstChild.Data
-
-	parts := strings.Split(issueDateText, " ")
-	if len(parts) != 12 {
-		return DailyForecast{}, errors.New("issue date text must contain 12 elements")
-	}
-
-	weekDay, monthDay, month, year, timezone := parts[7], parts[8], parts[9], parts[10], parts[11]
-
-	// FIXME turn to day as time.Time
-	fmt.Println(weekDay, monthDay, month, year, timezone)
 
 	tableNode, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classForecastTableBasic))
 	if !ok {
@@ -201,6 +188,7 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 	}
 
 	return newDailyForecast(
+		issueDate,
 		firstDay,
 		firstDayHours,
 		firstDayRatings,
@@ -210,93 +198,59 @@ func scrapeDailyForecast(n *html.Node) (DailyForecast, error) {
 	)
 }
 
-func scrapeFirstDay(n *html.Node) (Day, error) {
-	daysNode, ok := htmlutil.Find(
-		n,
-		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableDays),
-		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameDays),
-	)
+func scrapeIssueDate(n *html.Node, tz *timezone.Timezone) (time.Time, error) {
+	container, ok := htmlutil.Find(n, htmlutil.WithClassEqual(classBreakHeaderIssued))
 	if !ok {
-		return Day{}, errors.New("could not find days node")
+		return time.Time{}, errors.New("could not find issue container node")
 	}
 
-	firstDayNode := daysNode.FirstChild
-	if firstDayNode == nil {
-		return Day{}, errors.New("could not find first day node")
+	text := container.FirstChild
+	if text == nil {
+		return time.Time{}, errors.New("could not find issue text node")
 	}
 
-	firstDay, err := scrapeDay(firstDayNode)
+	parts := strings.Split(text.Data, " ")
+	if len(parts) != 12 {
+		return time.Time{}, fmt.Errorf("unexpected issue text: %q", text.Data)
+	}
+
+	dayText, monthText, yearText, tzAbbr := parts[8], parts[9], parts[10], parts[11]
+
+	day, err := parseDay(dayText)
 	if err != nil {
-		return Day{}, fmt.Errorf("could not scrape day: %w", err)
+		return time.Time{}, fmt.Errorf("could not parse issue day: %w", err)
 	}
 
-	return firstDay, nil
+	month, err := parseMonthShort(monthText)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not parse issue month: %w", err)
+	}
+
+	year, err := strconv.Atoi(yearText)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("issue year not integer: %q", yearText)
+	}
+
+	timezones, err := tz.GetTimezones(tzAbbr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not find timezones for %q abbreviation: %w", tzAbbr, err)
+	}
+
+	if len(timezones) == 0 {
+		return time.Time{}, fmt.Errorf("0 timezones found for %q abbreviation", tzAbbr)
+	}
+
+	timezone := timezones[0]
+
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not find time location for %q", timezone)
+	}
+
+	return time.Date(year, month, day, 0, 0, 0, 0, loc), nil
 }
 
-func scrapeDay(n *html.Node) (Day, error) {
-	container := n.LastChild
-	if container == nil {
-		return Day{}, errors.New("could not find day container node")
-	}
-
-	weekdayContainer := container.FirstChild
-	if weekdayContainer == nil {
-		return Day{}, errors.New("could not find weekday container node")
-	}
-
-	weekdayText := weekdayContainer.FirstChild
-	if weekdayText == nil {
-		return Day{}, errors.New("could not find weekday text node")
-	}
-
-	weekday, err := parseWeekday(weekdayText.Data)
-	if err != nil {
-		return Day{}, fmt.Errorf("could not parse weekday: %w", err)
-	}
-
-	monthDayContainer := container.LastChild
-	if monthDayContainer == nil {
-		return Day{}, errors.New("could not find month day container node")
-	}
-
-	monthDayText := monthDayContainer.FirstChild
-	if monthDayText == nil {
-		return Day{}, errors.New("could not find month day text node")
-	}
-
-	monthDay, err := parseMonthDay(monthDayText.Data)
-	if err != nil {
-		return Day{}, fmt.Errorf("could not parse month day: %w", err)
-	}
-
-	return Day{
-		Weekday:  weekday,
-		MonthDay: monthDay,
-	}, nil
-}
-
-func parseWeekday(s string) (time.Weekday, error) {
-	switch s {
-	case "Sunday":
-		return time.Sunday, nil
-	case "Monday":
-		return time.Monday, nil
-	case "Tuesday":
-		return time.Tuesday, nil
-	case "Wednesday":
-		return time.Wednesday, nil
-	case "Thursday":
-		return time.Thursday, nil
-	case "Friday":
-		return time.Friday, nil
-	case "Saturday":
-		return time.Saturday, nil
-	default:
-		return time.Weekday(0), fmt.Errorf("invalid weekday: %q", s)
-	}
-}
-
-func parseMonthDay(s string) (int, error) {
+func parseDay(s string) (int, error) {
 	day, err := strconv.Atoi(s)
 	if err != nil {
 		return 0, fmt.Errorf("not integer: %q", s)
@@ -307,6 +261,84 @@ func parseMonthDay(s string) (int, error) {
 	}
 
 	return day, nil
+}
+
+func parseMonthShort(s string) (time.Month, error) {
+	switch s {
+	case "Jan":
+		return time.January, nil
+	case "Feb":
+		return time.February, nil
+	case "Mar":
+		return time.March, nil
+	case "Apr":
+		return time.April, nil
+	case "May":
+		return time.May, nil
+	case "Jun":
+		return time.June, nil
+	case "Jul":
+		return time.July, nil
+	case "Aug":
+		return time.August, nil
+	case "Sep":
+		return time.September, nil
+	case "Oct":
+		return time.October, nil
+	case "Nov":
+		return time.November, nil
+	case "Dec":
+		return time.December, nil
+	default:
+		return time.Month(0), fmt.Errorf("invalid short month: %q", s)
+	}
+}
+
+func scrapeFirstDay(n *html.Node) (int, error) {
+	daysNode, ok := htmlutil.Find(
+		n,
+		htmlutil.WithClassContaining(classForecastTableRow, classForecastTableDays),
+		htmlutil.WithAttributeEqual(attributeDataRowName, dataRowNameDays),
+	)
+	if !ok {
+		return 0, errors.New("could not find days node")
+	}
+
+	firstDayNode := daysNode.FirstChild
+	if firstDayNode == nil {
+		return 0, errors.New("could not find first day node")
+	}
+
+	firstDay, err := scrapeDay(firstDayNode)
+	if err != nil {
+		return 0, fmt.Errorf("could not scrape day: %w", err)
+	}
+
+	return firstDay, nil
+}
+
+func scrapeDay(n *html.Node) (int, error) {
+	container := n.LastChild
+	if container == nil {
+		return 0, errors.New("could not find day container node")
+	}
+
+	monthDayContainer := container.LastChild
+	if monthDayContainer == nil {
+		return 0, errors.New("could not find month day container node")
+	}
+
+	monthDayText := monthDayContainer.FirstChild
+	if monthDayText == nil {
+		return 0, errors.New("could not find month day text node")
+	}
+
+	monthDay, err := parseDay(monthDayText.Data)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse month day: %w", err)
+	}
+
+	return monthDay, nil
 }
 
 func scrapeFirstDayHours(n *html.Node) ([]int, error) {

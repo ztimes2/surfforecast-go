@@ -3,6 +3,8 @@ package surfforecast
 import (
 	"net/http"
 	"time"
+
+	"github.com/tkuchiki/go-timezone"
 )
 
 const (
@@ -18,6 +20,7 @@ const (
 
 type Client struct {
 	httpClient *http.Client
+	timezones  *timezone.Timezone
 }
 
 func New(opts ...Option) *Client {
@@ -28,6 +31,7 @@ func New(opts ...Option) *Client {
 
 	return &Client{
 		httpClient: o.resolveHTTPClient(),
+		timezones:  timezone.New(),
 	}
 }
 
