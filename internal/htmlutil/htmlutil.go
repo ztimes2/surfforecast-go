@@ -8,6 +8,7 @@ import (
 
 const (
 	AttributeClass              = "class"
+	AttributeID                 = "id"
 	AttributeAlternateImageText = "alt"
 	AttributeTransform          = "transform"
 )
@@ -64,6 +65,12 @@ func WithClassContaining(values ...string) FindCondition {
 	}
 }
 
+func WithIDEqual(value string) FindCondition {
+	return func(n *html.Node) bool {
+		return IDEquals(n, value)
+	}
+}
+
 func WithAttributeEqual(key, value string) FindCondition {
 	return func(n *html.Node) bool {
 		return AttributeEquals(n, key, value)
@@ -88,6 +95,10 @@ func ClassContains(n *html.Node, values ...string) bool {
 		}
 	}
 	return true
+}
+
+func IDEquals(n *html.Node, value string) bool {
+	return AttributeEquals(n, AttributeID, value)
 }
 
 func AttributeEquals(n *html.Node, key, value string) bool {

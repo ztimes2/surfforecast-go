@@ -48,8 +48,6 @@ const (
 	transformRotateSuffix = ")"
 )
 
-var ErrBreakNotFound = errors.New("break not found")
-
 func (s *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, error) {
 	// TODO enable context propogation and cancelation
 	// TODO use chromedp to dynamically expand first day's forecast
@@ -76,7 +74,7 @@ func (s *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, err
 	defer resp.Body.Close()
 	node, err := html.Parse(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("could not parse response as html: %w", err)
+		return nil, fmt.Errorf("could not parse response body as html: %w", err)
 	}
 
 	forecasts, err := scrapeDailyForecasts(node, s.timezones)
