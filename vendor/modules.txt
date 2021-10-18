@@ -1,0 +1,7 @@
+# github.com/tkuchiki/go-timezone v0.2.2
+## explicit; go 1.16
+github.com/tkuchiki/go-timezone
+# golang.org/x/net v0.0.0-20211014222326-fd004c51d1d6
+## explicit; go 1.17
+golang.org/x/net/html
+golang.org/x/net/html/atom
