@@ -64,10 +64,13 @@ func (s *Scraper) SearchBreaks(query string) ([]Break, error) {
 		return nil, fmt.Errorf("could not read response body: %w", err)
 	}
 
-	// The search response's payload is expected to contain a 2D JSON array of
-	// strings that uses unconventional single quotes instead of double quotes.
-	// Therefore, these quotes need to be replaced in order to make JSON unmarshaling
-	// work properly.
+	// The search response's payload contains a 2D JSON-alike array of strings
+	// that uses single quotes to represent a string.
+	//
+	// Example: [['a','b','c'],['a','b','c']]
+	//
+	// Therefore, these single quotes need to be replaced with double quotes in
+	// order to make JSON unmarshaling work properly.
 	body = bytes.ReplaceAll(body, []byte(`'`), []byte(`"`))
 
 	var results [][]string
@@ -82,7 +85,8 @@ func (s *Scraper) SearchBreaks(query string) ([]Break, error) {
 		}
 
 		// The result's first element contains some alpha-numerical string, but
-		// I have no clue what it represents. Therefore, it is ignored... ¯\_(ツ)_/¯
+		// I have no clue what it represents. Therefore, it is ignored here. 
+		// ¯\_(ツ)_/¯
 
 		breaks = append(breaks, Break{
 			Name:        result[1],
