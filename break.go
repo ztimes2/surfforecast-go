@@ -29,11 +29,13 @@ const (
 )
 
 var (
+	// ErrBreakNotFound indicates that a surf break could not be found.
 	ErrBreakNotFound = errors.New("break not found")
 )
 
+// SearchBreaks searches for surf breaks by the given text query.
 func (s *Scraper) SearchBreaks(query string) ([]Break, error) {
-	u, err := url.Parse(baseURL + pathSearchBreaks)
+	u, err := url.Parse(s.baseURL + pathSearchBreaks)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare request url: %w", err)
 	}
@@ -62,6 +64,10 @@ func (s *Scraper) SearchBreaks(query string) ([]Break, error) {
 		return nil, fmt.Errorf("could not read response body: %w", err)
 	}
 
+	// The search response's payload is expected to contain a 2D JSON array of
+	// strings that uses unconventional single quotes instead of double quotes.
+	// Therefore, these quotes need to be replaced in order to make JSON unmarshaling
+	// work properly.
 	body = bytes.ReplaceAll(body, []byte(`'`), []byte(`"`))
 
 	var results [][]string
@@ -75,6 +81,9 @@ func (s *Scraper) SearchBreaks(query string) ([]Break, error) {
 			return nil, fmt.Errorf("unexpected search result")
 		}
 
+		// The result's first element contains some alpha-numerical string, but
+		// I have no clue what it represents. Therefore, it is ignored... ¯\_(ツ)_/¯
+
 		breaks = append(breaks, Break{
 			Name:        result[1],
 			CountryName: result[2],
@@ -84,15 +93,19 @@ func (s *Scraper) SearchBreaks(query string) ([]Break, error) {
 	return breaks, nil
 }
 
+// Break holds information about a surf break.
 type Break struct {
 	Name        string
 	CountryName string
 }
 
+// Break returns a surf break by its name.
+//
+// ErrBreakNotFound is returned when the given surf break does not exist.
 func (s *Scraper) Break(breakName string) (Break, error) {
 	path := fmt.Sprintf(pathFormatBreak, breakName)
 
-	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	req, err := http.NewRequest(http.MethodGet, s.baseURL+path, nil)
 	if err != nil {
 		return Break{}, fmt.Errorf("could not prepare request: %w", err)
 	}

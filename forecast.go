@@ -48,13 +48,19 @@ const (
 	transformRotateSuffix = ")"
 )
 
-func (s *Scraper) ForecastsForEightDays(breakName string) (*Forecasts, error) {
-	// TODO enable context propogation and cancelation
-	// TODO use chromedp to dynamically expand first day's forecast
+// ForecastsForEightDays returns the given surf break's latest forecast for 8 subsequent
+// days specified by its name. The returned forecast's timestamps use the given
+// surf break's local timezone. A forecast might contain 9 days when the function
+// is called during the transition between days.
+//
+// ErrBreakNotFound is returned when the given surf break does not exist.
+func (s *Scraper) EightDaysForecast(breakName string) (*Forecast, error) {
+	// IDEA: use chromedp to dynamically expand daily forecasts in order to scrape
+	// more information.
 
 	path := fmt.Sprintf(pathFormatForecastsForEightDays, breakName)
 
-	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	req, err := http.NewRequest(http.MethodGet, s.baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare request: %w", err)
 	}
@@ -77,7 +83,7 @@ func (s *Scraper) ForecastsForEightDays(breakName string) (*Forecasts, error) {
 		return nil, fmt.Errorf("could not parse response body as html: %w", err)
 	}
 
-	forecasts, err := scrapeForecasts(node, s.timezones)
+	forecasts, err := scrapeForecast(node, s.timezones)
 	if err != nil {
 		return nil, fmt.Errorf("could not scrape html: %w", err)
 	}
@@ -85,12 +91,16 @@ func (s *Scraper) ForecastsForEightDays(breakName string) (*Forecasts, error) {
 	return forecasts, nil
 }
 
-type Forecasts struct {
+// Forecast holds a forecast for multiple days.
+type Forecast struct {
+	// IssuedAt holds a timestamp of when the given forecast was issued by surf-forecast.com
+	// using the surf break's local timezone.
 	IssuedAt time.Time
 	Daily    []*DailyForecast
 }
 
-func newForecasts(
+// newForecast combines the scraped forecast data into Forecast.
+func newForecast(
 	issuedAt time.Time,
 	days []int,
 	hours [][]int,
@@ -98,7 +108,7 @@ func newForecasts(
 	swells [][]Swells,
 	waveEnergies [][]float64,
 	winds [][]wind,
-	windStates [][]string) (*Forecasts, error) {
+	windStates [][]string) (*Forecast, error) {
 
 	if len(days) != len(hours) {
 		return nil, errors.New("days and hours must have equal number of elements")
@@ -128,6 +138,7 @@ func newForecasts(
 	)
 	for i := range forecasts {
 		if previous != nil {
+			// Handle the case when a forecast contains days of two subsequent months.
 			if previous.Timestamp.Day() > days[i] {
 				if month+1 > time.December {
 					month = time.January
@@ -135,6 +146,7 @@ func newForecasts(
 				month++
 			}
 
+			// Handle the case when a forecast contains days of two subsequent years.
 			if previous.Timestamp.Month() > month {
 				year++
 			}
@@ -160,17 +172,21 @@ func newForecasts(
 		previous = f
 	}
 
-	return &Forecasts{
+	return &Forecast{
 		IssuedAt: issuedAt,
 		Daily:    forecasts,
 	}, nil
 }
 
+// DailyForecast holds a forecast for a single day broken down into hours.
 type DailyForecast struct {
+	// Timestamp holds a date of the day the underlying hourly forecasts belong to
+	// using the surf break's local timezone.
 	Timestamp time.Time
 	Hourly    []HourlyForecast
 }
 
+// newDailyForecast combines the scraped forecast data of a single day into DailyForecast.
 func newDailyForecast(
 	l *time.Location,
 	year int,
@@ -219,17 +235,23 @@ func newDailyForecast(
 	}, nil
 }
 
+// HourlyForecast holds a forecast for a single hour.
 type HourlyForecast struct {
-	Timestamp              time.Time
+	// Timestamp holds a timestamp of the given forecast's day and hour.
+	Timestamp time.Time
+
+	// Rating holds a rating score ranging from 0 to 10 that represents the surf
+	// quality according to surf-forecast.com.
 	Rating                 int
 	Swells                 Swells
 	WaveEnergyInKiloJoules float64
 	Wind                   Wind
-	// TODO tide
 }
 
+// Swells holds a list of swells starting from the primary swell and so forth.
 type Swells []Swell
 
+// Swell holds information about a swell.
 type Swell struct {
 	PeriodInSeconds              float64
 	DirectionToInDegrees         float64
@@ -237,6 +259,7 @@ type Swell struct {
 	WaveHeightInMeters           float64
 }
 
+// Wind holds information about a wind.
 type Wind struct {
 	SpeedInKilometersPerHour     float64
 	DirectionToInDegrees         float64
@@ -244,7 +267,7 @@ type Wind struct {
 	State                        string
 }
 
-func scrapeForecasts(n *html.Node, tz *timezone.Timezone) (*Forecasts, error) {
+func scrapeForecast(n *html.Node, tz *timezone.Timezone) (*Forecast, error) {
 	issuedAt, err := scrapeIssueTimestamp(n, tz)
 	if err != nil {
 		return nil, fmt.Errorf("could not scrape issue date: %w", err)
@@ -290,7 +313,7 @@ func scrapeForecasts(n *html.Node, tz *timezone.Timezone) (*Forecasts, error) {
 		return nil, fmt.Errorf("could not scrape wind states: %w", err)
 	}
 
-	return newForecasts(
+	return newForecast(
 		issuedAt,
 		days,
 		hours,
