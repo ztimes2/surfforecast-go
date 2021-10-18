@@ -12,17 +12,17 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println(len(ff))
+	fmt.Println("Issued at:", ff.IssuedAt)
 
-	f := ff[0]
+	f := ff.Daily[0]
 
-	fmt.Printf("Date: %s\n", f.TimestampLocal)
+	fmt.Printf("Date: %s\n", f.Timestamp)
 
-	for _, hf := range f.HourlyForecasts {
+	for _, hf := range f.Hourly {
 		fmt.Println()
 		fmt.Println("----------------------------------------")
 
-		fmt.Printf("Date: %s\n", hf.TimestampLocal)
+		fmt.Printf("Date: %s\n", hf.Timestamp)
 		fmt.Printf("Rating (0-10): %d\n", hf.Rating)
 		fmt.Printf("Wave energy (kJ): %v\n", hf.WaveEnergyInKiloJoules)
 		fmt.Printf("Wind speed (km/h): %v\n", hf.Wind.SpeedInKilometersPerHour)

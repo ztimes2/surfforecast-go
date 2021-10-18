@@ -144,7 +144,7 @@ func scrapeBreak(n *html.Node) (Break, error) {
 		return Break{}, errors.New("could not find country name text node")
 	}
 
-	breakNode, ok := htmlutil.FindOne(n, htmlutil.WithIDEqual(idLocationFilenamePart))
+	breakNode, ok := htmlutil.FindOne(navNode, htmlutil.WithIDEqual(idLocationFilenamePart))
 	if !ok {
 		return Break{}, errors.New("could not find break node")
 	}

@@ -48,7 +48,7 @@ const (
 	transformRotateSuffix = ")"
 )
 
-func (s *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, error) {
+func (s *Scraper) ForecastsForEightDays(breakName string) (*Forecasts, error) {
 	// TODO enable context propogation and cancelation
 	// TODO use chromedp to dynamically expand first day's forecast
 
@@ -77,7 +77,7 @@ func (s *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, err
 		return nil, fmt.Errorf("could not parse response body as html: %w", err)
 	}
 
-	forecasts, err := scrapeDailyForecasts(node, s.timezones)
+	forecasts, err := scrapeForecasts(node, s.timezones)
 	if err != nil {
 		return nil, fmt.Errorf("could not scrape html: %w", err)
 	}
@@ -85,20 +85,20 @@ func (s *Scraper) ForecastsForEightDays(breakName string) ([]*DailyForecast, err
 	return forecasts, nil
 }
 
-type DailyForecast struct {
-	TimestampLocal  time.Time
-	HourlyForecasts []HourlyForecast
+type Forecasts struct {
+	IssuedAt time.Time
+	Daily    []*DailyForecast
 }
 
-func newDailyForecasts(
-	issueDate time.Time,
+func newForecasts(
+	issuedAt time.Time,
 	days []int,
 	hours [][]int,
 	ratings [][]int,
 	swells [][]Swells,
 	waveEnergies [][]float64,
 	winds [][]wind,
-	windStates [][]string) ([]*DailyForecast, error) {
+	windStates [][]string) (*Forecasts, error) {
 
 	if len(days) != len(hours) {
 		return nil, errors.New("days and hours must have equal number of elements")
@@ -121,28 +121,28 @@ func newDailyForecasts(
 
 	var (
 		forecasts = make([]*DailyForecast, len(days))
-		year      = issueDate.Year()
-		month     = issueDate.Month()
+		year      = issuedAt.Year()
+		month     = issuedAt.Month()
 
 		previous *DailyForecast
 	)
 	for i := range forecasts {
 		if previous != nil {
-			if previous.TimestampLocal.Day() > days[i] {
+			if previous.Timestamp.Day() > days[i] {
 				if month+1 > time.December {
 					month = time.January
 				}
 				month++
 			}
 
-			if previous.TimestampLocal.Month() > month {
+			if previous.Timestamp.Month() > month {
 				year++
 			}
 		}
 
 		f, err := newDailyForecast(
-			issueDate.Location(),
-			issueDate.Year(),
+			issuedAt.Location(),
+			issuedAt.Year(),
 			month,
 			days[i],
 			hours[i],
@@ -160,7 +160,15 @@ func newDailyForecasts(
 		previous = f
 	}
 
-	return forecasts, nil
+	return &Forecasts{
+		IssuedAt: issuedAt,
+		Daily:    forecasts,
+	}, nil
+}
+
+type DailyForecast struct {
+	Timestamp time.Time
+	Hourly    []HourlyForecast
 }
 
 func newDailyForecast(
@@ -187,10 +195,13 @@ func newDailyForecast(
 	if len(hours) != len(winds) {
 		return nil, errors.New("hours and winds must have equal number of elements")
 	}
+	if len(hours) != len(windStates) {
+		return nil, errors.New("hours and wind states must have equal number of elements")
+	}
 
 	forecasts := make([]HourlyForecast, len(hours))
 	for i := range forecasts {
-		forecasts[i].TimestampLocal = time.Date(year, month, day, hours[i], 0, 0, 0, l)
+		forecasts[i].Timestamp = time.Date(year, month, day, hours[i], 0, 0, 0, l)
 		forecasts[i].Rating = ratings[i]
 		forecasts[i].Swells = swells[i]
 		forecasts[i].WaveEnergyInKiloJoules = waveEnergies[i]
@@ -203,13 +214,13 @@ func newDailyForecast(
 	}
 
 	return &DailyForecast{
-		TimestampLocal:  time.Date(year, month, day, 0, 0, 0, 0, l),
-		HourlyForecasts: forecasts,
+		Timestamp: time.Date(year, month, day, 0, 0, 0, 0, l),
+		Hourly:    forecasts,
 	}, nil
 }
 
 type HourlyForecast struct {
-	TimestampLocal         time.Time
+	Timestamp              time.Time
 	Rating                 int
 	Swells                 Swells
 	WaveEnergyInKiloJoules float64
@@ -233,8 +244,8 @@ type Wind struct {
 	State                        string
 }
 
-func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast, error) {
-	issueDate, err := scrapeIssueDate(n, tz)
+func scrapeForecasts(n *html.Node, tz *timezone.Timezone) (*Forecasts, error) {
+	issuedAt, err := scrapeIssueTimestamp(n, tz)
 	if err != nil {
 		return nil, fmt.Errorf("could not scrape issue date: %w", err)
 	}
@@ -279,8 +290,8 @@ func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast
 		return nil, fmt.Errorf("could not scrape wind states: %w", err)
 	}
 
-	return newDailyForecasts(
-		issueDate,
+	return newForecasts(
+		issuedAt,
 		days,
 		hours,
 		ratings,
@@ -291,7 +302,7 @@ func scrapeDailyForecasts(n *html.Node, tz *timezone.Timezone) ([]*DailyForecast
 	)
 }
 
-func scrapeIssueDate(n *html.Node, tz *timezone.Timezone) (time.Time, error) {
+func scrapeIssueTimestamp(n *html.Node, tz *timezone.Timezone) (time.Time, error) {
 	issueNode, ok := htmlutil.FindOne(n, htmlutil.WithClassEqual(classBreakHeaderIssued))
 	if !ok {
 		return time.Time{}, errors.New("could not find issue node")
@@ -307,7 +318,24 @@ func scrapeIssueDate(n *html.Node, tz *timezone.Timezone) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("unexpected issue text: %q", issueTextNode.Data)
 	}
 
-	dayText, monthText, yearText, tzAbbr := parts[8], parts[9], parts[10], parts[11]
+	hourText := parts[5]
+	clockPeriodText := parts[6]
+	dayText := parts[8]
+	monthText := parts[9]
+	yearText := parts[10]
+	tzAbbr := parts[11]
+
+	hour, err := parseTwelveClockHour(hourText)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not parse issue hour: %w", err)
+	}
+
+	clockPeriod, err := parseClockPeriod(clockPeriodText)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not parse clock period: %w", err)
+	}
+
+	hour = toTwentyFourClockHour(hour, clockPeriod)
 
 	day, err := parseDay(dayText)
 	if err != nil {
@@ -340,7 +368,7 @@ func scrapeIssueDate(n *html.Node, tz *timezone.Timezone) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("could not find time location for %q", timezone)
 	}
 
-	return time.Date(year, month, day, 0, 0, 0, 0, loc), nil
+	return time.Date(year, month, day, hour, 0, 0, 0, loc), nil
 }
 
 func parseDay(s string) (int, error) {
