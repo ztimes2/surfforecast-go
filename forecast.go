@@ -48,7 +48,7 @@ const (
 	transformRotateSuffix = ")"
 )
 
-// ForecastsForEightDays returns the given surf break's latest forecast for 8 subsequent
+// EightDaysForecast returns the given surf break's latest forecast for 8 subsequent
 // days specified by its name. The returned forecast's timestamps use the given
 // surf break's local timezone. A forecast might contain 9 days when the function
 // is called during the transition between days.
@@ -248,8 +248,11 @@ type HourlyForecast struct {
 	Wind                   Wind
 }
 
-// Swells holds a list of swells starting from the primary swell and so forth.
-type Swells []Swell
+// Swells holds information about primary and secondary swells.
+type Swells struct {
+	Primary   Swell
+	Secondary []Swell
+}
 
 // Swell holds information about a swell.
 type Swell struct {
@@ -671,7 +674,14 @@ func scrapeSwells(n *html.Node) ([][]Swells, error) {
 				return fmt.Errorf("could not scrape hourly swells: %w", err)
 			}
 
-			swells = append(swells, hourlySwells)
+			if len(hourlySwells) == 0 {
+				return fmt.Errorf("no swells")
+			}
+
+			swells = append(swells, Swells{
+				Primary:   hourlySwells[0],
+				Secondary: hourlySwells[1:],
+			})
 
 			isDayEnd := htmlutil.ClassContains(n, classIsDayEnd)
 			if isDayEnd {
