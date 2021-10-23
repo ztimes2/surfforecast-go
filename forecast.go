@@ -93,7 +93,7 @@ func (s *Scraper) EightDaysForecast(breakName string) (*Forecast, error) {
 
 // Forecast holds a forecast for multiple days.
 type Forecast struct {
-	// IssuedAt holds a timestamp of when the given forecast was issued by surf-forecast.com
+	// IssuedAt holds a timestamp of when the given forecast was issued by www.surf-forecast.com
 	// using the surf break's local timezone.
 	IssuedAt time.Time
 	Daily    []*DailyForecast
@@ -241,7 +241,7 @@ type HourlyForecast struct {
 	Timestamp time.Time
 
 	// Rating holds a rating score ranging from 0 to 10 that represents the surf
-	// quality according to surf-forecast.com.
+	// quality according to www.surf-forecast.com.
 	Rating                 int
 	Swells                 Swells
 	WaveEnergyInKiloJoules float64

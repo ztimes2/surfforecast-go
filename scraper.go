@@ -15,7 +15,7 @@ const (
 	defaultRequestTimeout = 10 * time.Second
 )
 
-// Scraper is a web scraper that sends requests to surf-forecast.com and scrapes
+// Scraper is a web scraper that sends requests to www.surf-forecast.com and scrapes
 // data from its responses.
 type Scraper struct {
 	httpClient *http.Client
