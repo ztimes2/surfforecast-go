@@ -32,7 +32,7 @@ func New(opts ...Option) *Scraper {
 
 	return &Scraper{
 		httpClient: o.resolveHTTPClient(),
-		timezones:  timezone.New(),
+		timezones:  o.resolveTimezones(),
 		baseURL:    baseURL,
 	}
 }
@@ -43,6 +43,7 @@ type Option func(*options)
 // options holds all the options available for configuring a Scraper.
 type options struct {
 	httpClient *http.Client
+	timezones  *timezone.Timezone
 	// TODO allow authentication to fetch even more detailed reports
 }
 
@@ -54,5 +55,26 @@ func (o options) resolveHTTPClient() *http.Client {
 	}
 	return &http.Client{
 		Timeout: defaultRequestTimeout,
+	}
+}
+
+func (o options) resolveTimezones() *timezone.Timezone {
+	if o.timezones != nil {
+		return o.timezones
+	}
+	return timezone.New()
+}
+
+// WithHTTPClient sets a custom HTTP client for Scraper.
+func WithHTTPClient(c *http.Client) Option {
+	return func(o *options) {
+		o.httpClient = c
+	}
+}
+
+// WithTimezone sets a custom timezone.Timezone for Scraper.
+func WithTimezone(t *timezone.Timezone) Option {
+	return func(o *options) {
+		o.timezones = t
 	}
 }
